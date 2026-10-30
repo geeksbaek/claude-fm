@@ -11,8 +11,8 @@
 
 ```sh
 ./scripts/build.sh            # build/Claude FM.app
-./scripts/build.sh --install  # ~/Applications/Claude FM.app 로 설치
-open ~/Applications/"Claude FM.app"
+./scripts/build.sh --install  # /Applications/Claude FM.app 로 설치
+open "/Applications/Claude FM.app"
 ```
 
 macOS 13 이상, Xcode 명령줄 도구가 필요하다. 로그인 시 자동 실행은 시스템 설정 > 일반 > 로그인 항목에서 추가한다.

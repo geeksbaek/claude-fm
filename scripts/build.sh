@@ -1,5 +1,5 @@
 #!/bin/bash
-# Claude FM.app 을 빌드해 build/ 에 만든다. --install 을 주면 ~/Applications 로 복사한다.
+# Claude FM.app 을 빌드해 build/ 에 만든다. --install 을 주면 /Applications 로 복사한다.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -23,9 +23,8 @@ codesign --force --sign - "$APP"
 echo "built: $APP"
 
 if [[ "${1:-}" == "--install" ]]; then
-  mkdir -p ~/Applications
   pkill -x ClaudeFM 2>/dev/null || true
-  rm -rf ~/Applications/"Claude FM.app"
-  cp -R "$APP" ~/Applications/
-  echo "installed: ~/Applications/Claude FM.app"
+  rm -rf "/Applications/Claude FM.app"
+  cp -R "$APP" /Applications/
+  echo "installed: /Applications/Claude FM.app"
 fi
