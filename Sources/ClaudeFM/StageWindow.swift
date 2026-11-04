@@ -77,6 +77,10 @@ final class StageWindowController: NSObject, NSWindowDelegate {
         stageView?.toast(text)
     }
 
+    func encore(banner: Bool) {
+        stageView?.encore(banner: banner)
+    }
+
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 540),
@@ -139,6 +143,7 @@ final class StageView: NSView {
     private var shakeStartedAt: TimeInterval = -10
     private var shakeStrength = 0.0
     private var splashLevel = 0.0
+    private var bannerUntil: TimeInterval = -10
     private var trackingArea: NSTrackingArea?
     var onTogglePlayback: (() -> Void)?
     var onNudgeSync: ((Double) -> Void)?
@@ -235,6 +240,12 @@ final class StageView: NSView {
         shakeStrength = strength
     }
 
+    /// 곡이 끝까지 흐르면 관객이 환호하고, 다음 곡이 없으면 전광판에 ENCORE 를 띄운다.
+    func encore(banner: Bool) {
+        cheer(for: 3.2)
+        if banner { bannerUntil = ProcessInfo.processInfo.systemUptime + 3.6 }
+    }
+
     private func cheer(for seconds: TimeInterval) {
         cheerUntil = max(cheerUntil, ProcessInfo.processInfo.systemUptime + seconds)
     }
@@ -328,6 +339,7 @@ final class StageView: NSView {
         let splashing = cue.map { $0.isTitle || $0.recap != nil } ?? false
         splashLevel = splashing ? min(1, splashLevel + dt / 0.35) : max(0, splashLevel - dt / 0.5)
         input.splash = splashLevel
+        input.banner = bannerUntil > now && !splashing ? "ENCORE!" : nil
         input.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         StageScene.render(input, into: canvas)
         CATransaction.begin()

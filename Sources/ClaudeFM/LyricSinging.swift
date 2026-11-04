@@ -96,6 +96,9 @@ final class LyricSinging: ObservableObject {
     var beatPeriod: (() -> Double?)?
     /// 무대가 지금 화면에 보이는지. 보일 때만 말풍선을 숨긴다.
     var stageIsVisible: (() -> Bool)?
+    /// 곡이 끝까지 흘렀을 때. 다음 곡이 곧바로 시작했으면 true. 앵콜 박수를 친다.
+    var onSongFinished: ((Bool) -> Void)?
+    private var applaudedKey: String?
 
     init(button: @escaping () -> NSButton?) {
         self.button = button
@@ -248,6 +251,9 @@ final class LyricSinging: ObservableObject {
     private func apply(_ track: NowTrack?) {
         guard let track else {
             externalPlaying = false
+            if let trackKey, finishedNaturally(snapshot, at: ProcessInfo.processInfo.systemUptime) {
+                applaud(trackKey, nextStarted: false)
+            }
             if snapshot != nil {
                 snapshot = nil
                 song = nil
@@ -284,6 +290,11 @@ final class LyricSinging: ObservableObject {
                 currentTrack.elapsed = prevElapsed
             }
         }
+        // 곡이 끝까지 흐른 뒤 다음 곡으로 넘어가거나 멈추면 앵콜 박수를 친다. 끝나기 전에 멈추거나 넘기면 치지 않는다.
+        if let previousKey = trackKey, now >= pauseGraceUntil, finishedNaturally(snapshot, at: now),
+           key != previousKey || abs(currentTrack.rate) <= 0.05 {
+            applaud(previousKey, nextStarted: key != previousKey && abs(currentTrack.rate) > 0.05)
+        }
         snapshot = Snapshot(currentTrack, at: now)
         setNowPlaying(title: currentTrack.title, artist: currentTrack.artist)
         if key != trackKey {
@@ -304,6 +315,18 @@ final class LyricSinging: ObservableObject {
             fetch(currentTrack, key: key)
         }
         present()
+    }
+
+    /// 재생 중이던 곡이 끝 4초 안까지 왔는지. 30초가 안 되는 짧은 소리는 빼고 본다.
+    private func finishedNaturally(_ snapshot: Snapshot?, at now: TimeInterval) -> Bool {
+        guard let snapshot, abs(snapshot.rate) > 0.05, let duration = snapshot.duration, duration > 30 else { return false }
+        return snapshot.elapsed(at: now) >= duration - 4
+    }
+
+    private func applaud(_ key: String, nextStarted: Bool) {
+        guard applaudedKey != key, isReactionEnabled else { return }
+        applaudedKey = key
+        onSongFinished?(nextStarted)
     }
 
     /// 말풍선을 켜거나 무대를 열었을 때, 아직 찾지 않은 지금 곡의 가사를 찾는다.

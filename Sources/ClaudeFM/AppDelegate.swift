@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let menu = NSMenu()
     private var animationTimer: Timer?
     private var lastIcon: IconKey?
+    /// 곡이 끝까지 흘렀을 때 메뉴바 Clawd 가 박수 치는 시간.
+    private var applauseUntil: TimeInterval = 0
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -74,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             guard let self, self.singing.isReactionEnabled, !self.singing.hasSyncedLyrics else { return }
             self.celebrate(nil)
         }
+        singing.onSongFinished = { [weak self] nextStarted in self?.applaud(banner: !nextStarted) }
         stage.onVisibilityChange = { [weak self] open in
             self?.singing.setStageActive(open)
             self?.syncAnimation()
@@ -157,6 +160,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         celebration.burst(at: anchor.rect, screen: anchor.screen, mood: rhythm.mood, reaction: reaction, force: force)
     }
 
+    /// 곡이 끝까지 흐르면 Clawd 가 두 팔을 들고 폴짝폴짝 박수를 친다. 무대에서는 관객이 환호하고,
+    /// 다음 곡 없이 끝났으면 전광판에 ENCORE 가 깜빡인다.
+    private func applaud(banner: Bool) {
+        applauseUntil = ProcessInfo.processInfo.systemUptime + 2.6
+        syncAnimation()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) { [weak self] in self?.syncAnimation() }
+        if stage.isShowingOnActiveSpace { stage.encore(banner: banner) }
+    }
+
     private func stageSnapshot() -> StageSnapshot {
         let now = ProcessInfo.processInfo.systemUptime
         var snapshot = StageSnapshot()
@@ -186,7 +198,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func syncAnimation() {
         // 박의 점프는 0.1초 안쪽이라, 재생 중이거나 춤추는 동안에는 프레임을 촘촘히 본다.
         // 가사를 부르는 동안에도 반응 그림이 떠오르도록 돌린다.
-        if player.isPlaying || rhythm.isDancing || singing.bubbleShown || stage.isOpen || singing.performance != nil {
+        let applauding = ProcessInfo.processInfo.systemUptime < applauseUntil
+        if player.isPlaying || rhythm.isDancing || singing.bubbleShown || stage.isOpen || singing.performance != nil || applauding {
             if animationTimer == nil {
                 let timer = Timer(timeInterval: Animation.danceInterval, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.tick() }
@@ -203,16 +216,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func tick() {
         var pose = rhythm.pose()
-        let accent = spriteAccent()
+        var accent = spriteAccent()
         // 후렴에서는 박에 맞춰 두 팔을 번쩍 든다.
         if accent.hook, pose.active { pose.style = .handsUp }
         singing.updateFeeling(rhythm.feeling())
         if pose.showsMotion != rhythm.isDancing {
             rhythm.applyDancing(pose.showsMotion)
-            if !pose.showsMotion, !player.isPlaying, !singing.bubbleShown, !stage.isOpen, singing.performance == nil {
+            if !pose.showsMotion, !player.isPlaying, !singing.bubbleShown, !stage.isOpen, singing.performance == nil,
+               ProcessInfo.processInfo.systemUptime >= applauseUntil {
                 animationTimer?.invalidate()
                 animationTimer = nil
             }
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        if now < applauseUntil {
+            pose.active = true
+            pose.style = .handsUp
+            pose.hop = abs(sin(now * 9))
+            accent.hook = true
         }
         let key = IconKey(at: Date(), playing: player.isPlaying, title: player.title, pose: pose, accent: accent,
                           needsPermission: rhythm.needsPermission)

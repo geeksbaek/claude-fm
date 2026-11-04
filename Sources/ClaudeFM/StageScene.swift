@@ -31,6 +31,8 @@ struct StageInput {
     var splash = 0.0
     /// 시스템 설정의 '동작 줄이기'. 전광판이 번쩍이지 않는다.
     var reduceMotion = false
+    /// 전광판에 깜빡이는 짧은 영문 글(ENCORE!).
+    var banner: String?
 }
 
 /// 무대에서 터진 폭죽과 그 나이.
@@ -375,10 +377,16 @@ enum StageScene {
         }
         let glyphShown = !glyphMask.isEmpty
         let barDim = (glyphShown ? 1 - 0.6 * input.reactionLevel : 1) * (1 - 0.75 * input.splash)
-        // 쉬는 동안에는 전광판 칸으로 이름을 쓴다. 칸이 모자라면 짧게 쓴다.
-        let idleWord = RasterCanvas.textWidth("CLAUDE FM") <= columns - 2 ? "CLAUDE FM" : "FM"
+        // 쉬는 동안에는 전광판 칸으로 이름을 쓰고, 앵콜 때는 ENCORE 를 깜빡인다. 칸이 모자라면 짧게 쓴다.
+        let idleWord: String
+        if let banner = input.banner {
+            idleWord = RasterCanvas.textWidth(banner) <= columns - 2 ? banner : "!"
+        } else {
+            idleWord = RasterCanvas.textWidth("CLAUDE FM") <= columns - 2 ? "CLAUDE FM" : "FM"
+        }
+        let showsWord = !input.live || input.banner != nil
         var idleMask = Set<Int>()
-        if !input.live, RasterCanvas.textWidth(idleWord) <= columns, rows >= 5 {
+        if showsWord, RasterCanvas.textWidth(idleWord) <= columns, rows >= 5 {
             let textCols = RasterCanvas.textWidth(idleWord)
             let left = (columns - textCols) / 2, top = (rows - 5) / 2
             var cursor = left
@@ -421,12 +429,21 @@ enum StageScene {
                     alpha = input.reactionLevel * (0.8 + 0.2 * hop) * (1 - 0.75 * input.splash)
                 }
                 if idleMask.contains(row * columns + column) {
-                    color = RGBColor.coral
-                    alpha = 0.55 + 0.35 * sin(input.time * 1.4)
+                    if input.banner != nil {
+                        color = palette.accent.mixed(with: .white, 0.3)
+                        alpha = Int(input.time * 5) % 2 == 0 ? 1 : 0.6
+                    } else {
+                        color = RGBColor.coral
+                        alpha = 0.55 + 0.35 * sin(input.time * 1.4)
+                    }
+                } else if input.banner != nil {
+                    alpha *= 0.2
                 }
                 canvas.fill(cellX, cellY, 2, 2, color, alpha)
                 if glyphMask[row * columns + column] != nil {
                     canvas.add(cellX - 1, cellY - 1, 4, 4, color, 0.12 * input.reactionLevel)
+                } else if input.banner != nil, idleMask.contains(row * columns + column) {
+                    canvas.add(cellX - 1, cellY - 1, 4, 4, color, 0.18 * alpha)
                 }
                 if strobe > 0.01 { canvas.add(cellX, cellY, 2, 2, .white, strobe) }
             }
