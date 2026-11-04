@@ -153,12 +153,34 @@ extension HangulReading {
         case ("ゑ", _), ("ヱ", _): return "e"
         case ("私", "watakushi"): return "watashi"
         case ("明日", "asu"), ("明日", "myounichi"): return "ashita"
+        case (_, _) where word.raw.count == 1 && japaneseKunReadings[word.raw]?.on.contains(word.latin) == true:
+            return japaneseKunReadings[word.raw]!.kun
         case ("何", "nan"):
             // 何も·何を·何が·何か 는 なに, 何で·何の·何だ·何度 는 なん.
             if next == nil || ["を", "が", "も", "か", "に", "より", "かも", "も"].contains(next!) { return "nani" }
             return "nan"
         default: return word.latin
         }
+    }
+
+    /// 홀로 선 한 글자 낱말을 음으로 읽었을 때(風 fuu) 가사에서 부르는 훈으로 고친다.
+    static let japaneseKunReadings: [String: (on: Set<String>, kun: String)] = [
+        "風": (["fuu", "fu"], "kaze"), "空": (["kuu"], "sora"), "夢": (["mu"], "yume"), "心": (["shin"], "kokoro"),
+        "花": (["ka"], "hana"), "雨": (["u"], "ame"), "涙": (["rui"], "namida"), "声": (["sei", "shou"], "koe"),
+        "夜": (["ya"], "yoru"), "星": (["sei", "shou"], "hoshi"), "海": (["kai"], "umi"), "光": (["kou"], "hikari"),
+        "道": (["dou"], "michi"), "手": (["shu"], "te"), "胸": (["kyou"], "mune"), "音": (["on", "in"], "oto"),
+        "恋": (["ren"], "koi"), "命": (["mei"], "inochi"), "春": (["shun"], "haru"), "夏": (["ka", "ge"], "natsu"),
+        "秋": (["shuu"], "aki"), "冬": (["tou"], "fuyu"), "雪": (["setsu"], "yuki"), "桜": (["ou"], "sakura"),
+        "鳥": (["chou"], "tori"), "瞳": (["dou"], "hitomi"), "翼": (["yoku"], "tsubasa"), "傷": (["shou"], "kizu"),
+        "時": (["ji"], "toki"), "人": (["jin", "nin"], "hito"),
+    ]
+
+    /// 앞 낱말이 동사 て 꼴의 で 인지(飛んで·泳いで). 명사 뒤 で 는 조사다.
+    static func isJapaneseTeForm(_ words: [JapaneseWord], at index: Int) -> Bool {
+        guard index >= 0, words[index].raw == "て" || words[index].raw == "で" else { return false }
+        guard words[index].raw == "で" else { return true }
+        guard index > 0, let last = words[index - 1].raw.last else { return false }
+        return last == "ん" || last == "い"
     }
 
     // MARK: - 붙여 부르기
@@ -193,7 +215,8 @@ extension HangulReading {
         if previous.raw == "じゃ" || previous.raw == "では", ["い", "し", "き", "み", "いる", "いく", "くる"].contains(core) { return false }
         if attachedJapaneseTokens.contains(core) { return true }
         if core.hasPrefix("ちゃ") || core.hasPrefix("じゃ") { return true }
-        if previous.raw == "て" || previous.raw == "で", japaneseTeAuxiliaries.contains(core) { return true }
+        if isJapaneseTeForm(words, at: index - 1), japaneseTeAuxiliaries.contains(core) { return true }
+        if previous.raw == "で", ["い", "し", "き", "み"].contains(core) { return false }
         if core == "そう", isJapaneseVerbStem(previous) { return true }
         return word.raw.count == 1 || ["て", "で", "た", "だ"].contains(core)
     }

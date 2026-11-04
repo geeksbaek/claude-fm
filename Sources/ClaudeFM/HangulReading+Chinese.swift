@@ -51,7 +51,7 @@ extension HangulReading {
             guard !reading.isEmpty else { continue }
             // 一九九九年·二零零八年 처럼 글자마다 끊긴 숫자와 그 뒤 단위는 한 낱말로 잇는다.
             if let last = spokenRaw.last, isChineseNumeral(last),
-               isChineseNumeral(raw) || (raw.count == 1 && chineseNumberUnits.contains(raw)) {
+               isChineseNumeral(raw) || chineseNumberUnits.contains(String(raw.suffix(1))) && (raw.count == 1 || isChineseNumeral(String(raw.dropLast()))) {
                 spoken[spoken.count - 1] += reading
                 spokenRaw[spokenRaw.count - 1] += raw
             } else {
