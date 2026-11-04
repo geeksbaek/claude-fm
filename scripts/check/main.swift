@@ -192,6 +192,16 @@ check(near(KaraokeText.sungWidth("가나 다라", progress: 0.625, measure: meas
 check(near(KaraokeText.sungWidth("가나 다라", progress: 1, measure: measure), 9), "다 부르면 전체 폭")
 check(KaraokeText.sungWidth("!!", progress: 0.5, measure: measure) == 0, "글자 없는 줄은 0")
 
+// 간주 음표 흐름은 빠르기가 바뀌어도 맥이 오래 켜져 있어도 튀지 않는다.
+var flow = FlowClock()
+_ = flow.advance(to: 300_000, speed: 0.28)
+let flowA = flow.advance(to: 300_000.016, speed: 0.36)
+check(abs(flowA - 0.016 * 0.36) < 1e-6, "한 프레임에 조금만 흐른다 \(flowA)")
+check(flow.advance(to: 300_000.016, speed: 0.30) == flowA, "같은 시각에는 그대로")
+let flowB = flow.advance(to: 300_100, speed: 0.3)
+check(abs(flowB - flowA - 0.03) < 1e-6, "오래 쉬어도 한 번에 0.1초만 \(flowB - flowA)")
+check(flow.advance(to: 299_000, speed: 0.3) == flowB, "시각이 거꾸로 가면 멈춘다")
+
 // 거의 모든 줄이 되풀이되는 곡은 가장 많이 되풀이되는 줄만 후렴으로 본다.
 var loopLRC = ""
 let loopLines = ["춤을 춰 춤을 춰요", "밤새도록 춤을 춰", "춤을 춰 춤을 춰요", "밤새도록 춤을 춰",

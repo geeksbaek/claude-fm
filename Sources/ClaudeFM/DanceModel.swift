@@ -103,6 +103,27 @@ enum Animation {
     }
 }
 
+/// 빠르기가 바뀌는 흐름을 시간에 따라 쌓는다. 빠르기를 시각에 곱하면 빠르기가 조금만 바뀌어도
+/// 큰 시각 값(맥이 켜진 뒤 흐른 초) 때문에 자리가 멀리 튀어, 음표가 미친 듯이 빨리 흐르는 것처럼 보인다.
+struct FlowClock {
+    private(set) var phase = 0.0
+    private var last: TimeInterval?
+
+    /// `time` 까지 `speed`(초당 바퀴)로 흐른 만큼 더한다. 같은 시각에 다시 부르면 그대로이고,
+    /// 오래 쉬었다 돌아와도 한 번에 0.1초 넘게 건너뛰지 않는다.
+    mutating func advance(to time: TimeInterval, speed: Double) -> Double {
+        if let last {
+            if time > last {
+                phase += min(0.1, time - last) * speed
+                self.last = time
+            }
+        } else {
+            last = time
+        }
+        return phase
+    }
+}
+
 /// 오늘 Clawd 와 함께 춤춘 시간과 박 수, 끝까지 들은 노래 수. 날짜가 바뀌면 새로 센다. 숫자만 남긴다.
 struct DailyRhythm: Codable, Equatable {
     var day: String

@@ -305,6 +305,8 @@ final class BubbleView: NSView {
     var cueShownAt: TimeInterval = 0
     /// 미리보기에서 시각을 고정해 그릴 때 쓴다. 0 이면 지금 시각.
     var frozenTime: TimeInterval = 0
+    /// 간주 음표가 흘러간 거리. 소리 세기에 따라 빠르기가 바뀌어도 자리가 튀지 않게 쌓아 간다.
+    private var noteFlow = FlowClock()
 
     override var isFlipped: Bool { true }
 
@@ -1343,9 +1345,9 @@ final class BubbleView: NSView {
         // 2) 물결을 타고 왼쪽에서 오른쪽으로 흘러가는 음표들
         let symbols = ["♪", "♫", "♬", "♩", "♫"]
         let count = symbols.count
-        let speed = 0.28 + Double(wave) * 0.08
+        let flow = noteFlow.advance(to: time, speed: 0.28 + Double(wave) * 0.08)
         for i in 0..<count {
-            let rawPhase = time * speed + Double(i) / Double(count)
+            let rawPhase = flow + Double(i) / Double(count)
             let u = rawPhase - floor(rawPhase) // 0.0 (왼쪽) -> 1.0 (오른쪽)
             let edgeFade: CGFloat
             if u < 0.18 {
