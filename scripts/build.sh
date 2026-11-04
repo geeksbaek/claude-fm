@@ -9,7 +9,9 @@ swift build -c release --product ClaudeFM
 BIN="$(swift build -c release --show-bin-path)/ClaudeFM"
 
 mkdir -p .build/tools
-swiftc -O scripts/render/main.swift Sources/ClaudeFM/ClawdSprite.swift -o .build/tools/render
+# 아이콘 도구는 앱의 main.swift 만 빼고 같은 소스를 쓴다.
+SOURCES=$(ls Sources/ClaudeFM/*.swift | grep -v '/main.swift$')
+swiftc -O -module-name ClaudeFM scripts/render/main.swift $SOURCES -o .build/tools/render
 rm -rf .build/AppIcon.iconset
 .build/tools/render icon .build/AppIcon.iconset
 

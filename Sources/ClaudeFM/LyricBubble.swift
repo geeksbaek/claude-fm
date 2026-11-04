@@ -1,5 +1,15 @@
 import AppKit
 
+/// 말풍선이 그릴 것을 고르는 설정.
+struct BubbleStyle: Equatable {
+    /// 부른 만큼 글자를 코랄로 채운다.
+    var karaoke = true
+    /// 가사 반응 스티커와 후렴 강조.
+    var reactions = true
+    /// 간주 끝 카운트다운을 박에 맞출 박 간격(초).
+    var beatPeriod: Double?
+}
+
 /// 메뉴바 아이콘 아래에 붙는, 클릭을 받지 않는 가사 말풍선.
 @MainActor
 final class LyricBubble {
@@ -11,7 +21,7 @@ final class LyricBubble {
     private let view = BubbleView()
     private var currentCue: LyricCue?
     private var transitionTimer: Timer?
-    private var interludeTimer: Timer?
+    private var animationTimer: Timer?
     private var transitionStart: TimeInterval = 0
     private var startFrame: NSRect = .zero
     private var targetFrame: NSRect = .zero
@@ -37,18 +47,25 @@ final class LyricBubble {
         panel.contentView = view
     }
 
-    func show(_ cue: LyricCue, feeling: VocalFeeling = .calm, feelingEnabled: Bool = true, anchor: NSRect, screen: NSScreen) {
+    func show(
+        _ cue: LyricCue,
+        clock: PlaybackClock? = nil,
+        style: BubbleStyle = BubbleStyle(),
+        feeling: VocalFeeling = .calm,
+        feelingEnabled: Bool = true,
+        anchor: NSRect,
+        screen: NSScreen
+    ) {
         let effective = feelingEnabled ? BubbleView.combinedFeeling(for: cue.current, audio: feeling) : .calm
         let layout = BubbleView.layout(for: cue)
         let nextFrame = computeFrame(size: layout.size, anchor: anchor, screen: screen)
-        let lineChanged = currentCue != nil
-            && (currentCue?.current != cue.current
-                || currentCue?.isInterlude != cue.isInterlude
-                || currentCue?.isHumming != cue.isHumming)
+        let lineChanged = (currentCue.map { !$0.isSameLine(as: cue) } ?? false)
             && panel.isVisible
             && (!view.text.isEmpty || view.isInterlude || view.isHumming)
         currentCue = cue
         view.feeling = effective
+        view.clock = clock
+        view.style = style
         targetFrame = nextFrame
         targetAnchorMidX = anchor.midX
 
@@ -57,15 +74,22 @@ final class LyricBubble {
             view.outgoingIsInterlude = view.isInterlude
             view.outgoingIsHumming = view.isHumming
             view.outgoingNextText = view.nextText
+            view.outgoingCue = view.cue
+            view.cue = cue
             view.isInterlude = cue.isInterlude
             view.isHumming = cue.isHumming
             view.text = layout.current
             view.nextText = layout.next
             view.transitionProgress = 0
+            view.cueShownAt = ProcessInfo.processInfo.systemUptime
             startFrame = panel.frame
             transitionStart = ProcessInfo.processInfo.systemUptime
             startTransitionTimer()
         } else {
+            if view.cue == nil || !(view.cue?.isSameLine(as: cue) ?? false) {
+                view.cueShownAt = ProcessInfo.processInfo.systemUptime
+            }
+            view.cue = cue
             view.isInterlude = cue.isInterlude
             view.isHumming = cue.isHumming
             view.text = layout.current
@@ -75,6 +99,7 @@ final class LyricBubble {
                 view.outgoingIsInterlude = false
                 view.outgoingIsHumming = false
                 view.outgoingNextText = nil
+                view.outgoingCue = nil
                 view.transitionProgress = 1
                 applyFrame(nextFrame, anchorMidX: anchor.midX)
             }
@@ -86,7 +111,7 @@ final class LyricBubble {
         if !panel.isVisible || !panel.isOnActiveSpace {
             panel.orderFrontRegardless()
         }
-        syncInterludeTimer()
+        syncAnimationTimer()
     }
 
     private func startTransitionTimer() {
@@ -98,22 +123,23 @@ final class LyricBubble {
         transitionTimer = timer
     }
 
-    private func syncInterludeTimer() {
-        if panel.isVisible && (view.isInterlude || view.outgoingIsInterlude || view.isHumming || view.outgoingIsHumming) {
-            if interludeTimer == nil {
+    /// 간주 음표, 노래방 채움, 카운트다운, 반응 스티커처럼 시간에 따라 움직이는 것이 있으면 다시 그린다.
+    private func syncAnimationTimer() {
+        if panel.isVisible && view.needsAnimation {
+            if animationTimer == nil {
                 view.noteTime = ProcessInfo.processInfo.systemUptime
-                let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated {
                         guard let self else { return }
                         self.view.noteTime = ProcessInfo.processInfo.systemUptime
                     }
                 }
                 RunLoop.main.add(timer, forMode: .common)
-                interludeTimer = timer
+                animationTimer = timer
             }
         } else {
-            interludeTimer?.invalidate()
-            interludeTimer = nil
+            animationTimer?.invalidate()
+            animationTimer = nil
         }
     }
 
@@ -138,9 +164,10 @@ final class LyricBubble {
             view.outgoingIsInterlude = false
             view.outgoingIsHumming = false
             view.outgoingNextText = nil
+            view.outgoingCue = nil
             view.transitionProgress = 1.0
             applyFrame(targetFrame, anchorMidX: targetAnchorMidX)
-            syncInterludeTimer()
+            syncAnimationTimer()
         }
     }
 
@@ -187,8 +214,8 @@ final class LyricBubble {
     func hide() {
         transitionTimer?.invalidate()
         transitionTimer = nil
-        interludeTimer?.invalidate()
-        interludeTimer = nil
+        animationTimer?.invalidate()
+        animationTimer = nil
         currentCue = nil
         view.text = ""
         view.nextText = nil
@@ -198,14 +225,18 @@ final class LyricBubble {
         view.isHumming = false
         view.outgoingIsHumming = false
         view.outgoingNextText = nil
+        view.cue = nil
+        view.outgoingCue = nil
+        view.clock = nil
         view.transitionProgress = 1.0
         guard panel.isVisible else { return }
         panel.orderOut(nil)
     }
 }
 
+/// 말풍선 그림. 미리보기 도구도 이 뷰를 그대로 그린다.
 @MainActor
-private final class BubbleView: NSView {
+final class BubbleView: NSView {
     static let outerPad: CGFloat = 6
     static let tail: CGFloat = 8
     static let padX: CGFloat = 13
@@ -214,6 +245,10 @@ private final class BubbleView: NSView {
     static let maxTextWidth: CGFloat = 320
     static let interludeWidth: CGFloat = 132
     static let hummingWidth: CGFloat = 114
+    /// 제목 카드 앞 음표 자리.
+    static let titleNoteWidth: CGFloat = 18
+    /// 곡 기록 양옆 픽셀 그림 자리.
+    static let recapGlyphWidth: CGFloat = 18
 
     var text = "" {
         didSet { if text != oldValue { needsDisplay = true } }
@@ -251,8 +286,37 @@ private final class BubbleView: NSView {
     var feeling = VocalFeeling.calm {
         didSet { if feeling != oldValue { needsDisplay = true } }
     }
+    /// 지금 줄의 시각·반응·후렴 정보.
+    var cue: LyricCue? {
+        didSet { if cue != oldValue { needsDisplay = true } }
+    }
+    /// 위로 사라지는 이전 줄의 정보. 다 부른 줄은 채운 색으로 떠난다.
+    var outgoingCue: LyricCue?
+    var clock: PlaybackClock? {
+        didSet { if clock != oldValue { needsDisplay = true } }
+    }
+    var style = BubbleStyle() {
+        didSet { if style != oldValue { needsDisplay = true } }
+    }
+    /// 지금 줄이 처음 보인 시각. 반응 스티커가 톡 튀어나오는 데 쓴다.
+    var cueShownAt: TimeInterval = 0
+    /// 미리보기에서 시각을 고정해 그릴 때 쓴다. 0 이면 지금 시각.
+    var frozenTime: TimeInterval = 0
 
     override var isFlipped: Bool { true }
+
+    /// 시간에 따라 다시 그려야 하는 요소가 있는지.
+    var needsAnimation: Bool {
+        if isInterlude || outgoingIsInterlude || isHumming || outgoingIsHumming { return true }
+        guard let cue else { return false }
+        if style.karaoke, clock != nil, cue.start != nil, cue.end != nil { return true }
+        if style.reactions, cue.reaction != nil || cue.isHook { return true }
+        return cue.recap != nil
+    }
+
+    private var now: TimeInterval {
+        frozenTime > 0 ? frozenTime : ProcessInfo.processInfo.systemUptime
+    }
 
     /// 가사 문장부호(`!`, `...`)와 실시간 오디오 파장(`VocalFeeling`)을 합쳐 말풍선 표현 강도를 정한다.
     static func combinedFeeling(for text: String, audio: VocalFeeling) -> VocalFeeling {
@@ -282,14 +346,20 @@ private final class BubbleView: NSView {
     /// 현재 가사와 다음 가사 미리보기의 줄바꿈·크기를 계산한다.
     static func layout(for cue: LyricCue) -> (current: String, next: String?, size: NSSize) {
         let (mainFormatted, mainTextSize): (String, NSSize)
+        let lineHeight = ceil(measureFont.ascender - measureFont.descender + measureFont.leading)
         if cue.isHumming {
-            let lineHeight = ceil(measureFont.ascender - measureFont.descender + measureFont.leading)
             mainFormatted = cue.current
             mainTextSize = NSSize(width: hummingWidth, height: lineHeight)
         } else if cue.isInterlude {
-            let lineHeight = ceil(measureFont.ascender - measureFont.descender + measureFont.leading)
             mainFormatted = cue.current
             mainTextSize = NSSize(width: interludeWidth, height: lineHeight)
+        } else if cue.isTitle {
+            let title = trimSingleLine(cue.current, font: measureFont, limit: maxTextWidth - titleNoteWidth)
+            mainFormatted = title
+            mainTextSize = NSSize(width: max(lineWidth(title) + 8 + titleNoteWidth, 60), height: lineHeight)
+        } else if cue.recap != nil {
+            mainFormatted = cue.current
+            mainTextSize = NSSize(width: lineWidth(cue.current) + 8 + recapGlyphWidth * 2, height: lineHeight)
         } else {
             (mainFormatted, mainTextSize) = layoutMain(for: cue.current)
         }
@@ -348,6 +418,22 @@ private final class BubbleView: NSView {
         return raw
     }
 
+    /// 한 줄에 들어가도록 글자 단위로 줄이고 말줄임표를 붙인다.
+    private static func trimSingleLine(_ raw: String, font: NSFont, limit: CGFloat) -> String {
+        let clean = raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        func width(_ text: String) -> CGFloat {
+            ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        }
+        guard width(clean) > limit else { return clean }
+        var chars = Array(clean)
+        while chars.count > 1 {
+            chars.removeLast()
+            let candidate = String(chars).trimmingCharacters(in: .whitespaces) + "…"
+            if width(candidate) <= limit { return candidate }
+        }
+        return clean
+    }
+
     private static func lineWidth(_ text: String) -> CGFloat {
         ceil((text as NSString).size(withAttributes: [.font: measureFont]).width)
     }
@@ -391,6 +477,17 @@ private final class BubbleView: NSView {
         return kept
     }
 
+    /// 지금 곡 시각. 동기 가사가 아니면 nil.
+    private var songElapsed: TimeInterval? {
+        clock?.elapsed(at: now)
+    }
+
+    /// 노래방 채움 비율. 채우지 않으면 nil.
+    private func sweep(for cue: LyricCue?) -> CGFloat? {
+        guard style.karaoke, let cue, let elapsed = songElapsed, let progress = cue.progress(at: elapsed) else { return nil }
+        return CGFloat(progress)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let shout = CGFloat(feeling.shout)
         let whisper = CGFloat(feeling.whisper)
@@ -398,6 +495,7 @@ private final class BubbleView: NSView {
         let beat = CGFloat(feeling.beat)
         let bass = CGFloat(feeling.bass)
         let phase = feeling.phase
+        let hook = style.reactions && (cue?.isHook ?? false) && !isInterlude && !isHumming
 
         // 외침(소리질러야 하는 부분)은 고주파 떨림, 속삭임은 잔잔한 부유감, 박자는 통통 튀는 반동을 준다.
         let shakeAmp = shout > 0.16 ? (shout - 0.16) * 2.4 : 0
@@ -409,6 +507,16 @@ private final class BubbleView: NSView {
         let dy = jitterY + floatY + bounceY
 
         let path = bubblePath(dx: dx, dy: dy)
+
+        // 후렴은 따뜻한 금빛 후광이 박에 맞춰 숨 쉰다.
+        if hook {
+            NSGraphicsContext.saveGraphicsState()
+            Self.hookGold.withAlphaComponent(0.26 + beat * 0.22 + wave * 0.08).setStroke()
+            path.lineWidth = 4.2 + beat * 1.6
+            path.lineJoinStyle = .round
+            path.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
         // 외침이나 강한 베이스가 들어오면 말풍선 바깥에 은은한 파장 후광을 그린다.
         if shout > 0.15 || bass > 0.35 {
@@ -431,8 +539,12 @@ private final class BubbleView: NSView {
             NSColor(srgbRed: 255 / 255, green: 105 / 255, blue: 65 / 255, alpha: shout * 0.09).setFill()
             path.fill()
         }
+        if hook {
+            Self.hookGold.withAlphaComponent(0.07 + beat * 0.05).setFill()
+            path.fill()
+        }
 
-        // 테두리 선 (속삭일 때는 점선, 외칠 때는 굵고 강렬한 코랄 레드)
+        // 테두리 선 (속삭일 때는 점선, 외칠 때는 굵고 강렬한 코랄 레드, 후렴은 코랄과 금빛 사이)
         NSGraphicsContext.saveGraphicsState()
         let borderColor: NSColor
         if shout > 0.2 {
@@ -442,15 +554,17 @@ private final class BubbleView: NSView {
                 blue: (87 - 36 * shout) / 255,
                 alpha: 1
             )
+        } else if hook {
+            borderColor = Self.stroke.blended(withFraction: 0.35 + beat * 0.25, of: Self.hookGold) ?? Self.stroke
         } else if whisper > 0.2 {
             borderColor = Self.stroke.withAlphaComponent(max(0.45, 0.88 - whisper * 0.38))
         } else {
             borderColor = Self.stroke.withAlphaComponent(0.88 + wave * 0.12)
         }
         borderColor.setStroke()
-        path.lineWidth = 1.45 + shout * 1.05 + wave * 0.35 - whisper * 0.35
+        path.lineWidth = 1.45 + shout * 1.05 + wave * 0.35 - whisper * 0.35 + (hook ? 0.45 : 0)
         path.lineJoinStyle = .round
-        if whisper > 0.25 && shout < 0.2 {
+        if whisper > 0.25 && shout < 0.2 && !hook {
             let pattern: [CGFloat] = [4.0, 3.2]
             path.setLineDash(pattern, count: pattern.count, phase: CGFloat(phase * 6.0))
         }
@@ -460,6 +574,9 @@ private final class BubbleView: NSView {
         // 소리질러야 하는 부분에서는 말풍선 모서리에 실시간 파장 강조선(폭발선)을 그린다.
         if shout > 0.32 {
             drawShoutSparks(dx: dx, dy: dy, shout: shout, wave: wave, color: borderColor)
+        }
+        if hook {
+            drawHookTwinkles(dx: dx, dy: dy, beat: beat)
         }
 
         // 오디오 파장이 살아 있을 때 말풍선 하단 중앙에 실시간 미니 파장 바를 그린다.
@@ -492,9 +609,9 @@ private final class BubbleView: NSView {
         let contentX = Self.outerPad + Self.padX + dx
         let contentWidth = bounds.width - (Self.outerPad + Self.padX) * 2
 
-        let style = NSMutableParagraphStyle()
-        style.alignment = .center
-        style.lineBreakMode = .byWordWrapping
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byWordWrapping
         let previewStyle = NSMutableParagraphStyle()
         previewStyle.alignment = .center
         previewStyle.lineBreakMode = .byTruncatingTail
@@ -502,7 +619,8 @@ private final class BubbleView: NSView {
         let baseAlpha: CGFloat = whisper > 0.2 ? max(0.66, 1.0 - whisper * 0.32) : 1.0
         let previewAlpha: CGFloat = 0.46
         let p = min(1.0, max(0.0, transitionProgress))
-        let animTime = noteTime > 0 ? noteTime : (phase > 0 ? phase : ProcessInfo.processInfo.systemUptime)
+        let animTime = noteTime > 0 ? noteTime : (phase > 0 ? phase : now)
+        let countdown = countdownState()
 
         if p < 1.0, (!outgoingText.isEmpty || outgoingIsInterlude || outgoingIsHumming) {
             let travelUp = max(mainBlockHeight + Self.previewGap, 18)
@@ -526,9 +644,14 @@ private final class BubbleView: NSView {
                 let outAttrs: [NSAttributedString.Key: Any] = [
                     .font: activeFont,
                     .foregroundColor: NSColor.labelColor.withAlphaComponent(outAlpha),
-                    .paragraphStyle: style,
+                    .paragraphStyle: paragraph,
                 ]
                 (outgoingText as NSString).draw(with: outRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: outAttrs)
+                // 다 부르고 떠나는 줄은 채운 색 그대로 올라간다.
+                if style.karaoke, clock != nil, let outgoingCue, outgoingCue.start != nil, outgoingCue.end != nil {
+                    drawSung(outgoingText, in: outRect, attributes: outAttrs, font: activeFont, progress: 1,
+                             color: Self.sungColor.withAlphaComponent(outAlpha))
+                }
             }
 
             // 2) 새 현재 가사(또는 간주 음표·흥얼거림): 아래에서 현재 가사 자리로 올라오며 선명해진다.
@@ -551,12 +674,12 @@ private final class BubbleView: NSView {
                     width: contentWidth,
                     height: mainBlockHeight + 4
                 )
-                drawInterludeNotes(in: risingRect, alpha: risingAlpha, time: animTime, wave: wave, beat: beat)
+                drawInterludeNotes(in: risingRect, alpha: risingAlpha * (1 - countdown.notesFade), time: animTime, wave: wave, beat: beat)
             } else {
                 let risingSize = Self.previewFont.pointSize + (activeFont.pointSize - Self.previewFont.pointSize) * p
                 let risingFont = p < 0.45
                     ? NSFont.systemFont(ofSize: risingSize, weight: .regular)
-                    : NSFont.systemFont(ofSize: risingSize, weight: shout > 0.3 ? .bold : .medium)
+                    : NSFont.systemFont(ofSize: risingSize, weight: shout > 0.3 || cue?.isTitle == true ? .bold : .medium)
                 let risingAlpha = previewAlpha + (baseAlpha - previewAlpha) * p
                 let risingY = (mainY + travelUp) * (1.0 - p) + mainY * p
                 let risingRect = NSRect(
@@ -568,12 +691,12 @@ private final class BubbleView: NSView {
                 var risingAttrs: [NSAttributedString.Key: Any] = [
                     .font: risingFont,
                     .foregroundColor: NSColor.labelColor.withAlphaComponent(risingAlpha),
-                    .paragraphStyle: style,
+                    .paragraphStyle: paragraph,
                 ]
                 if whisper > 0.25 {
                     risingAttrs[.kern] = 0.45 * whisper * p
                 }
-                (text as NSString).draw(with: risingRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: risingAttrs)
+                drawMainText(in: risingRect, attributes: risingAttrs, font: risingFont, alpha: risingAlpha, beat: beat)
             }
 
             // 3) 새 다음 가사 미리보기: 이미 떠 있던 다음 가사는 자리를 유지하고, 새 다음 가사는 아래에서 올라온다.
@@ -588,7 +711,7 @@ private final class BubbleView: NSView {
                 )
                 let nextAttrs: [NSAttributedString.Key: Any] = [
                     .font: Self.previewFont,
-                    .foregroundColor: NSColor.labelColor.withAlphaComponent(incomingAlpha),
+                    .foregroundColor: previewColor(alpha: incomingAlpha),
                     .paragraphStyle: previewStyle,
                 ]
                 (nextText as NSString).draw(with: nextRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: nextAttrs)
@@ -603,17 +726,24 @@ private final class BubbleView: NSView {
             if isHumming {
                 drawHumming(in: rect, alpha: baseAlpha, time: animTime, wave: wave, beat: beat, shout: shout, whisper: whisper)
             } else if isInterlude {
-                drawInterludeNotes(in: rect, alpha: baseAlpha, time: animTime, wave: wave, beat: beat)
+                drawInterludeNotes(in: rect, alpha: baseAlpha * (1 - countdown.notesFade), time: animTime, wave: wave, beat: beat)
+                if countdown.dots > 0 || countdown.notesFade > 0 {
+                    drawCountdownDots(countdown, in: rect, lineHeight: lineHeight, alpha: baseAlpha)
+                }
             } else {
                 var attributes: [NSAttributedString.Key: Any] = [
                     .font: activeFont,
                     .foregroundColor: NSColor.labelColor.withAlphaComponent(baseAlpha),
-                    .paragraphStyle: style,
+                    .paragraphStyle: paragraph,
                 ]
                 if whisper > 0.25 {
                     attributes[.kern] = 0.45 * whisper
                 }
-                (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
+                if cue?.isTitle == true {
+                    attributes[.font] = Self.titleFont
+                }
+                drawMainText(in: rect, attributes: attributes, font: (attributes[.font] as? NSFont) ?? activeFont,
+                             alpha: baseAlpha, beat: beat)
             }
 
             if let nextText, !nextText.isEmpty {
@@ -625,13 +755,186 @@ private final class BubbleView: NSView {
                 )
                 let nextAttrs: [NSAttributedString.Key: Any] = [
                     .font: Self.previewFont,
-                    .foregroundColor: NSColor.labelColor.withAlphaComponent(previewAlpha),
+                    .foregroundColor: previewColor(alpha: previewAlpha),
                     .paragraphStyle: previewStyle,
                 ]
                 (nextText as NSString).draw(with: nextRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: nextAttrs)
             }
         }
         NSGraphicsContext.restoreGraphicsState()
+
+        // 반응 스티커는 말풍선 오른쪽 위 모서리에 붙어 박에 맞춰 통통 뛴다.
+        if style.reactions, let reaction = cue?.reaction, cue?.recap == nil, !isInterlude, !isHumming {
+            drawReactionSticker(reaction, dx: dx, dy: dy, beat: beat, entering: p)
+        }
+    }
+
+    /// 제목 카드는 앞에 코랄 음표를, 곡 기록은 양옆에 픽셀 그림을 붙이고, 노래 줄은 부른 만큼 채운다.
+    private func drawMainText(in rect: NSRect, attributes: [NSAttributedString.Key: Any], font: NSFont, alpha: CGFloat, beat: CGFloat) {
+        let width = ceil((text as NSString).size(withAttributes: attributes).width)
+        if cue?.isTitle == true {
+            let noteFont = NSFont.systemFont(ofSize: font.pointSize + 1, weight: .bold)
+            let note = "♪" as NSString
+            let noteAttrs: [NSAttributedString.Key: Any] = [
+                .font: noteFont,
+                .foregroundColor: Self.stroke.withAlphaComponent(alpha),
+            ]
+            let total = width + Self.titleNoteWidth
+            let startX = rect.minX + max(0, (rect.width - total) / 2)
+            let noteSize = note.size(withAttributes: noteAttrs)
+            note.draw(at: NSPoint(x: startX + (Self.titleNoteWidth - noteSize.width) / 2 - 2,
+                                  y: rect.minY + (font.ascender - noteFont.ascender) - beat * 1.2),
+                      withAttributes: noteAttrs)
+            let textRect = NSRect(x: startX + Self.titleNoteWidth, y: rect.minY, width: width + 2, height: rect.height)
+            var left = attributes
+            let leftStyle = NSMutableParagraphStyle()
+            leftStyle.alignment = .left
+            leftStyle.lineBreakMode = .byTruncatingTail
+            left[.paragraphStyle] = leftStyle
+            (text as NSString).draw(with: textRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: left)
+            return
+        }
+        if let recap = cue?.recap {
+            let glyph = PixelGlyph.reaction(recap.reaction)
+            let lineHeight = ceil(font.ascender - font.descender + font.leading)
+            let startX = rect.minX + (rect.width - width) / 2
+            let glyphY = rect.minY + (lineHeight - 10) / 2 - beat * 1.5
+            drawGlyph(glyph, x: startX - Self.recapGlyphWidth + 2, y: glyphY, pixel: 2, alpha: alpha)
+            drawGlyph(glyph, x: startX + width + Self.recapGlyphWidth - 12, y: glyphY, pixel: 2, alpha: alpha)
+        }
+        (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
+        if let progress = sweep(for: cue), progress > 0 {
+            drawSung(text, in: rect, attributes: attributes, font: font, progress: progress,
+                     color: Self.sungColor.withAlphaComponent(alpha))
+        }
+    }
+
+    /// 부른 만큼만 보이도록 잘라서 같은 글을 채운 색으로 한 번 더 그린다. 두 줄이면 윗줄부터 채운다.
+    private func drawSung(_ text: String, in rect: NSRect, attributes: [NSAttributedString.Key: Any], font: NSFont,
+                          progress: CGFloat, color: NSColor) {
+        let lines = text.components(separatedBy: "\n")
+        let widths = lines.map { min(rect.width, ceil(($0 as NSString).size(withAttributes: attributes).width)) }
+        let total = widths.reduce(0, +)
+        guard total > 0 else { return }
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        var remaining = min(1, progress) * total
+        let clip = NSBezierPath()
+        for (index, width) in widths.enumerated() {
+            guard remaining > 0 else { break }
+            let take = min(width, remaining)
+            remaining -= width
+            let x = rect.minX + (rect.width - width) / 2
+            let top = rect.minY + CGFloat(index) * lineHeight - (index == 0 ? 3 : 0)
+            let bottom = rect.minY + CGFloat(index + 1) * lineHeight + (index == lines.count - 1 ? 4 : 0)
+            clip.appendRect(NSRect(x: x - 2, y: top, width: take + 2, height: bottom - top))
+        }
+        NSGraphicsContext.saveGraphicsState()
+        clip.addClip()
+        var sung = attributes
+        sung[.foregroundColor] = color
+        (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: sung)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private struct Countdown {
+        var dots = 0
+        /// 이번 점이 사라지는 중인 정도(0...1).
+        var fading: CGFloat = 0
+        /// 간주 음표가 카운트다운에 자리를 내주는 정도(0...1).
+        var notesFade: CGFloat = 0
+    }
+
+    /// 노래방처럼 다음 줄이 오기 전 세 박을 점으로 센다.
+    private func countdownState() -> Countdown {
+        guard isInterlude, let cue, let elapsed = songElapsed, let remaining = cue.countdown(at: elapsed) else { return Countdown() }
+        var unit = 0.75
+        if let period = style.beatPeriod, period >= 0.3, period <= 1.2 { unit = period }
+        let window = min(unit * 3, 3.2)
+        unit = window / 3
+        guard remaining <= window + 0.35 else { return Countdown() }
+        var state = Countdown()
+        state.notesFade = CGFloat(min(1, max(0, (window + 0.35 - remaining) / 0.35)))
+        guard remaining <= window else { return state }
+        let ticks = remaining / unit
+        state.dots = min(3, Int(ceil(ticks)))
+        state.fading = ticks == floor(ticks) ? 0 : CGFloat(1 - (ticks - floor(ticks)))
+        return state
+    }
+
+    private func drawCountdownDots(_ countdown: Countdown, in rect: NSRect, lineHeight: CGFloat, alpha: CGFloat) {
+        guard countdown.dots > 0 else { return }
+        let spacing: CGFloat = 15
+        let radius: CGFloat = 3.4
+        let centerY = rect.minY + lineHeight / 2
+        let startX = rect.midX - spacing
+        for index in 0..<3 {
+            // 왼쪽 점부터 사라져서 마지막 점이 가사 쪽에 남는다.
+            let visibleFrom = 3 - countdown.dots
+            guard index >= visibleFrom else { continue }
+            var scale: CGFloat = 1
+            var dotAlpha = alpha
+            if index == visibleFrom {
+                let fade = max(0, countdown.fading - 0.55) / 0.45
+                scale = 1 - fade * 0.6
+                dotAlpha *= 1 - fade
+            }
+            let r = radius * scale
+            let x = startX + CGFloat(index) * spacing
+            let dot = NSRect(x: x - r, y: centerY - r, width: r * 2, height: r * 2)
+            Self.stroke.withAlphaComponent(dotAlpha).setFill()
+            NSBezierPath(ovalIn: dot).fill()
+        }
+    }
+
+    /// 말풍선 오른쪽 위 모서리에 반응 그림을 붙인다. 새 줄이 오면 톡 튀어나온다.
+    private func drawReactionSticker(_ reaction: LyricReaction, dx: CGFloat, dy: CGFloat, beat: CGFloat, entering: CGFloat) {
+        let glyph = PixelGlyph.reaction(reaction)
+        let age = max(0, now - cueShownAt)
+        let pop = age < 0.28 ? CGFloat(age / 0.28) : 1
+        let overshoot = pop < 1 ? 1 + sin(pop * .pi) * 0.25 : 1
+        let pixel = 2 * overshoot * max(0.4, pop)
+        let size = pixel * 5
+        let right = bounds.width - Self.outerPad + dx
+        let top = Self.outerPad + Self.tail + dy
+        let x = right - size * 0.82
+        let y = top - size * 0.45 - beat * 2.2
+        drawGlyph(glyph, x: x, y: y, pixel: pixel, alpha: min(1, entering * 1.4))
+    }
+
+    private func drawGlyph(_ glyph: PixelGlyph, x: CGFloat, y: CGFloat, pixel: CGFloat, alpha: CGFloat) {
+        guard alpha > 0.01 else { return }
+        for dot in glyph.pixels {
+            dot.color.nsColor(alpha: alpha).setFill()
+            NSRect(x: x + CGFloat(dot.x) * pixel, y: y + CGFloat(dot.y) * pixel, width: pixel, height: pixel).fill()
+        }
+    }
+
+    /// 후렴일 때 아래 두 모서리에서 작은 별이 번갈아 반짝인다.
+    private func drawHookTwinkles(dx: CGFloat, dy: CGFloat, beat: CGFloat) {
+        let left = Self.outerPad + dx
+        let right = bounds.width - Self.outerPad + dx
+        let bottom = bounds.height - Self.outerPad + dy
+        let t = noteTime > 0 ? noteTime : now
+        let spots: [(CGFloat, CGFloat, Double)] = [
+            (left + 7, bottom - 5, 0),
+            (right - 7, bottom - 5, 1.6),
+            (left + 14, bottom - 2, 3.1),
+        ]
+        for (x, y, offset) in spots {
+            let twinkle = CGFloat(0.5 + 0.5 * sin(t * 5.2 + offset)) * 0.8 + beat * 0.2
+            guard twinkle > 0.15 else { continue }
+            let arm = 1.5 + twinkle * 1.5
+            Self.hookGold.withAlphaComponent(min(1, twinkle)).setFill()
+            NSRect(x: x - 0.75, y: y - arm, width: 1.5, height: arm * 2).fill()
+            NSRect(x: x - arm, y: y - 0.75, width: arm * 2, height: 1.5).fill()
+        }
+    }
+
+    /// 제목 카드의 가수 줄은 조금 더 또렷하게 둔다.
+    private func previewColor(alpha: CGFloat) -> NSColor {
+        if cue?.isTitle == true { return NSColor.secondaryLabelColor.withAlphaComponent(min(1, alpha + 0.35)) }
+        if cue?.recap != nil { return NSColor.secondaryLabelColor.withAlphaComponent(min(1, alpha + 0.25)) }
+        return NSColor.labelColor.withAlphaComponent(alpha)
     }
 
     /// 가사를 모르는 곡일 때 글자 없이 콧노래 선율 파동과 리듬을 타는 음표만으로 흥얼거림을 표현한다.
@@ -885,5 +1188,13 @@ private final class BubbleView: NSView {
     private static let previewGap: CGFloat = 3
     private static let measureFont = NSFont.systemFont(ofSize: 14.5, weight: .bold)
     private static let previewFont = NSFont.systemFont(ofSize: 11.0, weight: .regular)
-    private static let stroke = NSColor(srgbRed: 217 / 255, green: 119 / 255, blue: 87 / 255, alpha: 1)
+    private static let titleFont = NSFont.systemFont(ofSize: 13.5, weight: .semibold)
+    static let stroke = NSColor(srgbRed: 217 / 255, green: 119 / 255, blue: 87 / 255, alpha: 1)
+    /// 부른 글자. 라이트·다크 모두에서 읽히도록 코랄을 조금 진하게.
+    private static let sungColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 1.0, green: 0.56, blue: 0.40, alpha: 1)
+            : NSColor(srgbRed: 0.80, green: 0.36, blue: 0.22, alpha: 1)
+    }
+    private static let hookGold = NSColor(srgbRed: 1.0, green: 0.76, blue: 0.24, alpha: 1)
 }

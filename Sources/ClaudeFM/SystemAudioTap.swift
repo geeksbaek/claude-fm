@@ -10,6 +10,8 @@ final class SystemAudioTap: @unchecked Sendable {
         var high: Double
         var full: Double
         var dt: Double
+        /// 옥타브 대역 여덟 개의 진폭 제곱 평균. 무대 전광판에 쓴다.
+        var bands: SIMD8<Double> = .zero
     }
 
     /// 메인 큐에서 호출된다.
@@ -153,13 +155,14 @@ final class SystemAudioTap: @unchecked Sendable {
 
     private func consume(_ input: UnsafePointer<AudioBufferList>) {
         guard running.withLock({ $0 }) else { return }
-        let (low, high, full, frames) = filters.energies(input, format: format)
+        let (low, high, full, bands, frames) = filters.energies(input, format: format)
         guard frames > 0 else { return }
         let dt = Double(frames) / format.mSampleRate
         let shouldFlush = bucket.withLock { bucket -> Bool in
             bucket.low = max(bucket.low, low)
             bucket.high = max(bucket.high, high)
             bucket.full = max(bucket.full, full)
+            bucket.bands = pointwiseMax(bucket.bands, bands)
             bucket.dt += dt
             let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             // 박의 타격이 평균에 묻히지 않도록, 세기가 튀면 주기를 기다리지 않고 올린다.
@@ -177,7 +180,7 @@ final class SystemAudioTap: @unchecked Sendable {
         let chunk: Chunk? = bucket.withLock { bucket in
             bucket.armed = false
             guard bucket.dt > 0 else { return nil }
-            let chunk = Chunk(low: bucket.low, high: bucket.high, full: bucket.full, dt: bucket.dt)
+            let chunk = Chunk(low: bucket.low, high: bucket.high, full: bucket.full, dt: bucket.dt, bands: bucket.bands)
             let lastNotify = bucket.lastNotify
             bucket = Bucket()
             bucket.lastNotify = lastNotify
@@ -214,28 +217,34 @@ final class SystemAudioTap: @unchecked Sendable {
         var high = 0.0
         var full = 0.0
         var dt = 0.0
+        var bands = SIMD8<Double>.zero
         var sentLow = 0.0
         var armed = false
         var lastNotify: UInt64 = 0
     }
 }
 
-/// 모노로 섞은 뒤 킥 대역과 심벌 대역의 에너지를 구한다. IO 콜백 안에서만 상태를 갱신한다.
+/// 모노로 섞은 뒤 킥 대역과 심벌 대역, 옥타브 대역 여덟 개의 에너지를 구한다. IO 콜백 안에서만 상태를 갱신한다.
 private struct BandSplit {
     private var lowpass: Biquad
     private var highpass: Biquad
+    private var octaves: [Biquad]
 
     init(sampleRate: Double) {
         let rate = max(sampleRate, 8_000)
         lowpass = Biquad.lowpass(frequency: 140, q: 0.707, sampleRate: rate)
         highpass = Biquad.highpass(frequency: 2_000, q: 0.707, sampleRate: rate)
+        // 나이퀴스트에 너무 가까운 대역은 표본율에 맞춰 낮춘다.
+        octaves = SpectrumMeter.centers.map { center in
+            Biquad.bandpass(frequency: min(center, rate * 0.42), q: 1.41, sampleRate: rate)
+        }
     }
 
-    mutating func energies(_ input: UnsafePointer<AudioBufferList>, format: AudioStreamBasicDescription) -> (Double, Double, Double, Int) {
+    mutating func energies(_ input: UnsafePointer<AudioBufferList>, format: AudioStreamBasicDescription) -> (Double, Double, Double, SIMD8<Double>, Int) {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
-        guard let first = buffers.first, first.mData != nil, first.mDataByteSize > 0 else { return (0, 0, 0, 0) }
+        guard let first = buffers.first, first.mData != nil, first.mDataByteSize > 0 else { return (0, 0, 0, .zero, 0) }
         let channels = Int(format.mChannelsPerFrame)
-        guard channels > 0 else { return (0, 0, 0, 0) }
+        guard channels > 0 else { return (0, 0, 0, .zero, 0) }
         let planar = (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
         let frames: Int
         if planar {
@@ -243,15 +252,21 @@ private struct BandSplit {
         } else {
             frames = Int(first.mDataByteSize) / (MemoryLayout<Float>.size * max(Int(first.mNumberChannels), 1))
         }
-        guard frames > 0 else { return (0, 0, 0, 0) }
+        guard frames > 0 else { return (0, 0, 0, .zero, 0) }
 
         var lowSum = 0.0, highSum = 0.0, fullSum = 0.0
+        var bandSums = SIMD8<Double>.zero
+        let bandCount = min(octaves.count, 8)
         func consume(_ sample: Double) {
             let low = lowpass.process(sample)
             let high = highpass.process(sample)
             lowSum += low * low
             highSum += high * high
             fullSum += sample * sample
+            for band in 0..<bandCount {
+                let value = octaves[band].process(sample)
+                bandSums[band] += value * value
+            }
         }
 
         if planar {
@@ -275,7 +290,7 @@ private struct BandSplit {
         }
 
         let scale = 1 / Double(frames)
-        return (lowSum * scale, highSum * scale, fullSum * scale, frames)
+        return (lowSum * scale, highSum * scale, fullSum * scale, bandSums * scale, frames)
     }
 }
 
@@ -289,6 +304,20 @@ private struct Biquad {
 
     static func highpass(frequency: Double, q: Double, sampleRate: Double) -> Biquad {
         coefficients(frequency: frequency, q: q, sampleRate: sampleRate, lowpass: false)
+    }
+
+    /// 가운데 주파수에서 이득이 1 인 대역 통과.
+    static func bandpass(frequency: Double, q: Double, sampleRate: Double) -> Biquad {
+        let w0 = 2 * Double.pi * frequency / sampleRate
+        let alpha = sin(w0) / (2 * q)
+        let a0 = 1 + alpha
+        var filter = Biquad()
+        filter.b0 = alpha / a0
+        filter.b1 = 0
+        filter.b2 = -alpha / a0
+        filter.a1 = (-2 * cos(w0)) / a0
+        filter.a2 = (1 - alpha) / a0
+        return filter
     }
 
     private static func coefficients(frequency: Double, q: Double, sampleRate: Double, lowpass: Bool) -> Biquad {

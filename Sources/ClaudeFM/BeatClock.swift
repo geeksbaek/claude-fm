@@ -33,6 +33,9 @@ struct BeatClock {
     private var highFluxAvg = 0.0
     private var fullFluxAvg = 0.0
     private var lastBeat = -1.0
+    /// 다음 박을 셀 기준 시각. 채워 넣은 박 뒤에 늦게 온 진짜 타격으로 옮겨 갈 수 있다.
+    private var gridBeat = -1.0
+    private var lastBeatPredicted = false
     private var lastLoud = -1.0
     private var danceSince = -1.0
     private var stepRight = false
@@ -50,6 +53,26 @@ struct BeatClock {
     private(set) var mood = MusicMood.quiet
     private var pendingMood = MusicMood.quiet
     private var pendingSince = -1.0
+
+    /// 박 간격이 안정됐을 때의 빠르기(BPM). 아직 박을 못 잡았으면 nil.
+    var tempo: Double? { period.map { 60 / $0 } }
+
+    /// 박 간격(초). 아직 박을 못 잡았으면 nil.
+    var beatPeriod: Double? { period }
+
+    /// 지금 박 안에서 얼마나 지났는지(0...1). 박을 못 잡았으면 0.
+    func beatPhase(at now: Double) -> Double {
+        guard lastBeat >= 0, let period, period > 0 else { return 0 }
+        return min(1, max(0, (now - lastBeat) / period))
+    }
+
+    /// 사람이 세는 빠르기에 가깝게 반이나 두 배로 접는다.
+    static func foldBPM(_ tempo: Double?) -> Int? {
+        guard var value = tempo, value.isFinite, value > 0 else { return nil }
+        while value < 70 { value *= 2 }
+        while value > 180 { value /= 2 }
+        return Int(value.rounded())
+    }
 
     mutating func ingest(low: Double, high: Double, full: Double, dt: Double, now: Double) {
         let lowFlux = max(0, low - prevLow)
@@ -73,14 +96,22 @@ struct BeatClock {
         let lowHit = lowFlux > max(lowFluxAvg * 1.65, 5e-7) && low >= 2e-6
         let highHit = highFlux > max(highFluxAvg * 2.1, 1e-6) && high >= 4e-6
         let fullHit = fullFlux > max(fullFluxAvg * 1.9, 3e-6) && full >= 2e-5
-        var hit = (lowHit || highHit || fullHit) && since >= 0.18
-        // 박이 안정되면, 타격이 묻힌 박도 그 간격으로 한 번 더 밟는다.
-        if !hit, let period, full >= Self.audibleEnergy, since >= period * 0.86, since <= period * 1.14 {
+        let onset = lowHit || highHit || fullHit
+        var hit = onset && since >= 0.18
+        var predicted = false
+        let sinceGrid = gridBeat < 0 ? 1_000.0 : now - gridBeat
+        if !hit, onset, lastBeatPredicted, since < 0.18 {
+            // 채워 넣은 박 바로 뒤에 진짜 타격이 오면, 다시 뛰지 않고 다음 박을 셀 기준만 그 타격으로 옮긴다.
+            gridBeat = now
+            lastBeatPredicted = false
+        } else if !hit, let period, full >= Self.audibleEnergy, sinceGrid >= period * 1.02, sinceGrid <= period * 1.14 {
+            // 박이 안정되면, 타격이 묻힌 박도 그 간격으로 한 번 더 밟는다. 제 박보다 먼저 밟지 않는다.
             hit = true
+            predicted = true
         }
 
         if hit {
-            if lastBeat >= 0 {
+            if lastBeat >= 0, !predicted {
                 let interval = now - lastBeat
                 if (0.22...1.1).contains(interval) {
                     intervals.append(interval)
@@ -89,6 +120,8 @@ struct BeatClock {
                 }
             }
             lastBeat = now
+            gridBeat = now
+            lastBeatPredicted = predicted
             stepRight.toggle()
             beatCount += 1
         }

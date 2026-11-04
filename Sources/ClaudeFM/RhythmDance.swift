@@ -7,6 +7,8 @@ final class RhythmDance: ObservableObject {
     @Published private(set) var isDancing = false
     @Published private(set) var mood = MusicMood.quiet
     @Published private(set) var needsPermission = false
+    /// 박 간격이 안정됐을 때의 빠르기. 70~180 사이로 접어서 보여 준다.
+    @Published private(set) var bpm: Int?
 
     /// 춤이 시작·끝나거나 새 박이 들어올 때. 메뉴바 아이콘을 바로 갱신한다.
     var onActivityChange: (() -> Void)?
@@ -14,6 +16,7 @@ final class RhythmDance: ObservableObject {
     var onFeelingChange: ((VocalFeeling) -> Void)?
 
     private var clock = BeatClock()
+    private var meter = SpectrumMeter()
     private let tap = SystemAudioTap()
     private var accessTimer: Timer?
     private var heardAudio = false
@@ -51,6 +54,22 @@ final class RhythmDance: ObservableObject {
         clock.feeling(at: time)
     }
 
+    /// 무대 전광판에 쓰는 옥타브 대역 세기(0...1).
+    func spectrum(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> [Double] {
+        meter.levels(at: time)
+    }
+
+    /// 박 간격(초). 간주 끝 카운트다운을 박에 맞출 때 쓴다.
+    var beatPeriod: Double? { clock.beatPeriod }
+
+    /// 지금까지 밟은 박 수. 무대 조명이 박마다 바뀐다.
+    var beatCount: Int { clock.beatCount }
+
+    /// 지금 박 안에서 얼마나 지났는지(0...1). 응원봉이 박에 맞춰 좌우로 흔들린다.
+    func beatPhase(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Double {
+        clock.beatPhase(at: time)
+    }
+
     /// 소리 콜백이 끊겨도 메뉴바 타이머가 움직임이 끝난 것을 알 수 있게 한다.
     func applyDancing(_ dancing: Bool) {
         guard dancing != isDancing else { return }
@@ -76,6 +95,9 @@ final class RhythmDance: ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         let beatsBefore = clock.beatCount
         clock.ingest(low: chunk.low, high: chunk.high, full: chunk.full, dt: chunk.dt, now: now)
+        let bands = chunk.bands
+        meter.ingest((0..<SpectrumMeter.bandCount).map { bands[$0] }, dt: chunk.dt, now: now,
+                     audible: chunk.full >= BeatClock.audibleEnergy)
         if chunk.full >= BeatClock.audibleEnergy {
             heardAudio = true
             silenceWhileRunning = 0
@@ -87,6 +109,12 @@ final class RhythmDance: ObservableObject {
         let moodChanged = pose.mood != mood
         if motionChanged { isDancing = moving }
         if moodChanged { mood = pose.mood }
+        // 박을 잠깐 놓쳐도 마지막 빠르기를 들고 있다가, 소리가 끊기면 지운다.
+        if pose.mood == .quiet {
+            if bpm != nil { bpm = nil }
+        } else if let tempo = BeatClock.foldBPM(clock.tempo), bpm.map({ abs($0 - tempo) >= 2 }) ?? true {
+            bpm = tempo
+        }
         if motionChanged || moodChanged || clock.beatCount != beatsBefore { onActivityChange?() }
         onFeelingChange?(clock.feeling(at: now))
         guard debug, now - lastDebugLog > 1 else { return }
