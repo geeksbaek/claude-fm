@@ -61,7 +61,9 @@ final class RhythmDance: ObservableObject {
     }
 
     func feeling(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> VocalFeeling {
-        clock.feeling(at: time)
+        var feeling = clock.feeling(at: time)
+        feeling.bands = meter.levels(at: time)
+        return feeling
     }
 
     /// 무대 전광판에 쓰는 옥타브 대역 세기(0...1).
@@ -135,7 +137,7 @@ final class RhythmDance: ObservableObject {
             lastDailyFlush = now
             flushDaily(save: now - lastDailySave >= 30)
         }
-        onFeelingChange?(clock.feeling(at: now))
+        onFeelingChange?(feeling(at: now))
         if clock.surgeCount != surgesBefore { onSurge?() }
         guard debug, now - lastDebugLog > 1 else { return }
         lastDebugLog = now

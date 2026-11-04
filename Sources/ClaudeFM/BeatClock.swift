@@ -14,6 +14,12 @@ struct VocalFeeling: Equatable {
     var bass: Double = 0
     /// 실시간 흔들림·파장 위상 (초 단위)
     var phase: Double = 0
+    /// 마지막 박에서 지난 시간(초). 박을 못 잡았으면 크다. 말풍선 글자 물결과 출렁임에 쓴다.
+    var sinceBeat: Double = 10
+    /// 지금 분위기.
+    var mood = MusicMood.quiet
+    /// 옥타브 대역 여덟 개의 세기(0...1). 말풍선 아래 목소리 무늬에 쓴다.
+    var bands: [Double] = []
 
     static let calm = VocalFeeling()
 }
@@ -260,7 +266,9 @@ struct BeatClock {
             whisper: min(1.0, whisperEnv * fade),
             beat: min(1.0, beatHop * fade),
             bass: min(1.0, bassEnv * fade),
-            phase: now
+            phase: now,
+            sinceBeat: sinceBeat,
+            mood: mood
         )
     }
 

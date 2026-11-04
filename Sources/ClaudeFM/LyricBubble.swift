@@ -8,6 +8,8 @@ struct BubbleStyle: Equatable {
     var reactions = true
     /// 간주 끝 카운트다운을 박에 맞출 박 간격(초).
     var beatPeriod: Double?
+    /// 필링 효과. 끄면 글자와 말풍선이 소리에 맞춰 움직이지 않는다.
+    var feeling = true
 }
 
 /// 메뉴바 아이콘 아래에 붙는, 클릭을 받지 않는 가사 말풍선.
@@ -202,6 +204,7 @@ final class LyricBubble {
 
     func updateFeeling(_ feeling: VocalFeeling, enabled: Bool = true) {
         guard panel.isVisible else { return }
+        view.style.feeling = enabled
         view.feeling = enabled ? BubbleView.combinedFeeling(for: view.text, audio: feeling) : .calm
     }
 
@@ -488,31 +491,56 @@ final class BubbleView: NSView {
         return CGFloat(progress)
     }
 
+    /// 필링 효과가 켜져 있고 '동작 줄이기'가 꺼져 있을 때만 움직인다. 색과 빛은 그대로 둔다.
+    private var motionEnabled: Bool {
+        style.feeling && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// 지금 줄이 후렴이라 금빛으로 꾸미는지.
+    private var hookActive: Bool {
+        style.reactions && (cue?.isHook ?? false) && !isInterlude && !isHumming
+    }
+
     override func draw(_ dirtyRect: NSRect) {
+        let motion = motionEnabled
         let shout = CGFloat(feeling.shout)
         let whisper = CGFloat(feeling.whisper)
         let wave = CGFloat(feeling.wave)
-        let beat = CGFloat(feeling.beat)
+        let pulse = CGFloat(feeling.beat)
+        let beat = motion ? pulse : 0
         let bass = CGFloat(feeling.bass)
         let phase = feeling.phase
-        let hook = style.reactions && (cue?.isHook ?? false) && !isInterlude && !isHumming
+        let hook = hookActive
 
-        // 외침(소리질러야 하는 부분)은 고주파 떨림, 속삭임은 잔잔한 부유감, 박자는 통통 튀는 반동을 준다.
-        let shakeAmp = shout > 0.16 ? (shout - 0.16) * 2.4 : 0
+        // 외치면 말풍선이 살짝 떨리고(글자는 저마다 따로 떤다), 속삭이면 잔잔히 뜬다. 박은 말캉한 출렁임으로 받는다.
+        let shakeAmp = motion && shout > 0.16 ? (shout - 0.16) * 1.1 : 0
         let jitterX = CGFloat(sin(phase * 43.0)) * shakeAmp
         let jitterY = CGFloat(cos(phase * 36.0)) * shakeAmp * 0.75
-        let floatY = whisper > 0.15 ? CGFloat(sin(phase * 2.6)) * whisper * 1.4 : 0
-        let bounceY = beat * 1.8
+        let floatY = motion && whisper > 0.15 ? CGFloat(sin(phase * 2.6)) * whisper * 1.4 : 0
         let dx = jitterX
-        let dy = jitterY + floatY + bounceY
+        let dy = jitterY + floatY
+
+        if motion, let context = NSGraphicsContext.current?.cgContext {
+            let squash = jellySquash()
+            if squash != 0 {
+                // 꼬리 끝을 붙잡고 눌렸다가 용수철처럼 튀어 오른다. 아이콘에서 떨어지지 않는다.
+                let anchor = CGPoint(x: min(max(tailX, 0), bounds.width), y: Self.outerPad)
+                context.translateBy(x: anchor.x, y: anchor.y)
+                context.scaleBy(x: 1 + squash * 0.55, y: 1 - squash)
+                context.translateBy(x: -anchor.x, y: -anchor.y)
+            }
+        }
 
         let path = bubblePath(dx: dx, dy: dy)
+        if motion {
+            drawSoundRing(path, hook: hook)
+        }
 
         // 후렴은 따뜻한 금빛 후광이 박에 맞춰 숨 쉰다.
         if hook {
             NSGraphicsContext.saveGraphicsState()
-            Self.hookGold.withAlphaComponent(0.26 + beat * 0.22 + wave * 0.08).setStroke()
-            path.lineWidth = 4.2 + beat * 1.6
+            Self.hookGold.withAlphaComponent(0.26 + pulse * 0.22 + wave * 0.08).setStroke()
+            path.lineWidth = 4.2 + pulse * 1.6
             path.lineJoinStyle = .round
             path.stroke()
             NSGraphicsContext.restoreGraphicsState()
@@ -540,7 +568,7 @@ final class BubbleView: NSView {
             path.fill()
         }
         if hook {
-            Self.hookGold.withAlphaComponent(0.07 + beat * 0.05).setFill()
+            Self.hookGold.withAlphaComponent(0.07 + pulse * 0.05).setFill()
             path.fill()
         }
 
@@ -555,7 +583,7 @@ final class BubbleView: NSView {
                 alpha: 1
             )
         } else if hook {
-            borderColor = Self.stroke.blended(withFraction: 0.35 + beat * 0.25, of: Self.hookGold) ?? Self.stroke
+            borderColor = Self.stroke.blended(withFraction: 0.35 + pulse * 0.25, of: Self.hookGold) ?? Self.stroke
         } else if whisper > 0.2 {
             borderColor = Self.stroke.withAlphaComponent(max(0.45, 0.88 - whisper * 0.38))
         } else {
@@ -576,12 +604,16 @@ final class BubbleView: NSView {
             drawShoutSparks(dx: dx, dy: dy, shout: shout, wave: wave, color: borderColor)
         }
         if hook {
-            drawHookTwinkles(dx: dx, dy: dy, beat: beat)
+            drawHookTwinkles(dx: dx, dy: dy, beat: pulse)
         }
 
-        // 오디오 파장이 살아 있을 때 말풍선 하단 중앙에 실시간 미니 파장 바를 그린다.
+        // 소리가 살아 있을 때 말풍선 아래 가운데에 지금 소리의 목소리 무늬를 그린다.
         if wave > 0.04 || shout > 0.2 {
-            drawWaveformBars(dx: dx, dy: dy, wave: wave, shout: shout, whisper: whisper, phase: phase, color: borderColor)
+            if feeling.bands.count == SpectrumMeter.bandCount {
+                drawVoiceprint(dx: dx, dy: dy, bands: feeling.bands, whisper: whisper, color: borderColor)
+            } else {
+                drawWaveformBars(dx: dx, dy: dy, wave: wave, shout: shout, whisper: whisper, phase: phase, color: borderColor)
+            }
         }
 
         // 가사 글자 그리기 (전환 중에는 이전 가사가 위로 사라지고, 다음 가사가 아래에서 위로 올라온다)
@@ -801,12 +833,261 @@ final class BubbleView: NSView {
             let glyphY = rect.minY + (lineHeight - 10) / 2 - beat * 1.5
             drawGlyph(glyph, x: startX - Self.recapGlyphWidth + 2, y: glyphY, pixel: 2, alpha: alpha)
             drawGlyph(glyph, x: startX + width + Self.recapGlyphWidth - 12, y: glyphY, pixel: 2, alpha: alpha)
+            (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
+            return
         }
-        (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
-        if let progress = sweep(for: cue), progress > 0 {
-            drawSung(text, in: rect, attributes: attributes, font: font, progress: progress,
-                     color: Self.sungColor.withAlphaComponent(alpha))
+        drawSingingText(text, in: rect, attributes: attributes, font: font, alpha: alpha)
+    }
+
+    // MARK: - 노래하는 글자
+
+    /// 글자 하나를 그릴 자리. 띄어쓰기와 문장부호는 노래방 글자 순서(`letter`)에 들지 않는다.
+    private struct GlyphSlot {
+        var font: CTFont
+        var glyph: CGGlyph
+        var x: CGFloat
+        var baseline: CGFloat
+        var width: CGFloat
+        var letter: Int?
+        /// 이 글자 앞에 나온 글자 수. 문장부호는 앞 글자를 다 부르면 같이 채운다.
+        var lettersBefore: Int
+    }
+
+    /// 줄마다 가운데 맞춘 글자 자리를 Core Text 로 구한다. 한글처럼 대체 글꼴로 그리는 글자도 제 글꼴을 쓴다.
+    private func glyphSlots(_ text: String, in rect: NSRect, attributes: [NSAttributedString.Key: Any],
+                            lineHeight: CGFloat) -> (slots: [GlyphSlot], letters: Int) {
+        var slots: [GlyphSlot] = []
+        var letters = 0
+        for (row, lineText) in text.components(separatedBy: "\n").enumerated() {
+            // UTF-16 자리마다 몇 번째 글자인지와 그 앞까지의 글자 수를 적어 둔다.
+            var letterAt: [Int: Int] = [:]
+            var beforeAt: [Int: Int] = [:]
+            var offset = 0
+            for char in lineText {
+                let length = char.utf16.count
+                let isLetter = char.isLetter || char.isNumber
+                for unit in offset..<(offset + length) {
+                    beforeAt[unit] = letters
+                    if isLetter { letterAt[unit] = letters }
+                }
+                if isLetter { letters += 1 }
+                offset += length
+            }
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: lineText, attributes: attributes))
+            var ascent: CGFloat = 0
+            var descent: CGFloat = 0
+            var leading: CGFloat = 0
+            let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+            let originX = rect.minX + max(0, (rect.width - width) / 2)
+            let baseline = rect.minY + CGFloat(row) * lineHeight + ascent
+            for run in CTLineGetGlyphRuns(line) as! [CTRun] {
+                let count = CTRunGetGlyphCount(run)
+                guard count > 0, let value = (CTRunGetAttributes(run) as NSDictionary)[kCTFontAttributeName] else { continue }
+                let runFont = value as! CTFont
+                var glyphs = [CGGlyph](repeating: 0, count: count)
+                var positions = [CGPoint](repeating: .zero, count: count)
+                var advances = [CGSize](repeating: .zero, count: count)
+                var indices = [CFIndex](repeating: 0, count: count)
+                let all = CFRange(location: 0, length: 0)
+                CTRunGetGlyphs(run, all, &glyphs)
+                CTRunGetPositions(run, all, &positions)
+                CTRunGetAdvances(run, all, &advances)
+                CTRunGetStringIndices(run, all, &indices)
+                for index in 0..<count {
+                    slots.append(GlyphSlot(font: runFont, glyph: glyphs[index], x: originX + positions[index].x,
+                                           baseline: baseline, width: advances[index].width,
+                                           letter: letterAt[indices[index]], lettersBefore: beforeAt[indices[index]] ?? 0))
+                }
+            }
         }
+        return (slots, letters)
+    }
+
+    /// 노래 줄을 글자마다 그린다. 부른 글자 수만큼 코랄로 채우고, 필링 효과가 켜져 있으면
+    /// 지금 부르는 글자가 톡 솟고, 박마다 물결이 글자 사이를 지나가고, 외칠 때는 글자마다 떨고,
+    /// 속삭일 때는 숨 쉬듯 떠오른다. 후렴에는 금빛 반짝임이 글자 사이를 훑고 지나간다.
+    private func drawSingingText(_ text: String, in rect: NSRect, attributes: [NSAttributedString.Key: Any],
+                                 font: NSFont, alpha: CGFloat) {
+        guard let context = NSGraphicsContext.current?.cgContext else {
+            (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)
+            return
+        }
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let layout = glyphSlots(text, in: rect, attributes: attributes, lineHeight: lineHeight)
+        guard !layout.slots.isEmpty else { return }
+        let motion = motionEnabled
+        let total = Double(layout.letters)
+        let sung = sweep(for: cue).map { Double($0) * total }
+        let time = noteTime > 0 ? noteTime : now
+        let shout = CGFloat(feeling.shout)
+        let whisper = CGFloat(feeling.whisper)
+        let energy = CGFloat(min(1, feeling.wave * 0.8 + feeling.bass * 0.5))
+        let ripple = motion && feeling.sinceBeat < 1 ? 1.5 * energy : 0
+        let tremble = motion && shout > 0.25 ? (shout - 0.25) * 1.6 : 0
+        let breath = motion && whisper > 0.15 ? whisper * 1.5 : 0
+        let gold = (Self.hookGold.usingColorSpace(.sRGB) ?? Self.hookGold).withAlphaComponent(alpha)
+        let unsung = (attributes[.foregroundColor] as? NSColor ?? NSColor.labelColor.withAlphaComponent(alpha))
+        let unsungColor = unsung.usingColorSpace(.sRGB) ?? unsung
+        let sungColor = (Self.sungColor.usingColorSpace(.sRGB) ?? Self.sungColor).withAlphaComponent(alpha)
+        // 후렴에는 금빛 반짝임이 1.6초마다 왼쪽에서 오른쪽으로 지나간다.
+        let shimmerX: CGFloat? = hookActive
+            ? rect.minX - 24 + CGFloat(time.truncatingRemainder(dividingBy: 1.6) / 1.6) * (rect.width + 48)
+            : nil
+        let xHeight = font.xHeight
+
+        context.saveGState()
+        context.textMatrix = .identity
+        if motion, shout > 0.3 {
+            context.setShadow(offset: .zero, blur: 2 + 3 * shout,
+                              color: NSColor(srgbRed: 1, green: 0.4, blue: 0.25, alpha: 0.5 * shout * alpha).cgColor)
+        }
+        for (index, slot) in layout.slots.enumerated() {
+            var dx: CGFloat = 0
+            var dy: CGFloat = 0
+            var scale: CGFloat = 1
+            var angle: CGFloat = 0
+            if ripple > 0 {
+                let t = feeling.sinceBeat - Double(index) * 0.018
+                if t > 0, t < 0.22 { dy -= CGFloat(sin(.pi * t / 0.22)) * ripple }
+            }
+            if tremble > 0 {
+                let seed = Double(index)
+                dx += CGFloat(sin(feeling.phase * 47 + seed * 2.17)) * tremble
+                dy += CGFloat(cos(feeling.phase * 39 + seed * 1.31)) * tremble * 0.8
+                angle = CGFloat(sin(feeling.phase * 23 + seed * 3.1)) * 0.06 * shout
+            }
+            if breath > 0 {
+                dy += CGFloat(sin(time * 2.4 - Double(index) * 0.55)) * breath
+            }
+            var amount: CGFloat = 0
+            if let sung {
+                if let letter = slot.letter {
+                    amount = CGFloat(min(1, max(0, sung - Double(letter))))
+                    if motion, sung < total {
+                        let near = max(0, 1 - abs(sung - (Double(letter) + 0.5)) / 0.9)
+                        scale += CGFloat(near) * 0.12
+                        dy -= CGFloat(near) * 1.3
+                    }
+                } else if slot.lettersBefore > 0, sung >= Double(slot.lettersBefore) {
+                    amount = 1
+                }
+            }
+            var base = unsungColor
+            var lit = sungColor
+            if let shimmerX {
+                let glow = max(0, 1 - abs(slot.x + slot.width / 2 - shimmerX) / 16)
+                if glow > 0 {
+                    base = base.blended(withFraction: glow * 0.55, of: gold) ?? base
+                    lit = lit.blended(withFraction: glow * 0.6, of: gold) ?? lit
+                }
+            }
+            let pivot = CGPoint(x: slot.x + slot.width / 2, y: slot.baseline - xHeight / 2)
+            context.saveGState()
+            context.translateBy(x: pivot.x + dx, y: pivot.y + dy)
+            if angle != 0 { context.rotate(by: angle) }
+            if scale != 1 { context.scaleBy(x: scale, y: scale) }
+            context.translateBy(x: slot.x - pivot.x, y: slot.baseline - pivot.y)
+            // 여기서부터는 글자 기준선 위가 +y 다.
+            context.scaleBy(x: 1, y: -1)
+            var glyph = slot.glyph
+            var origin = CGPoint.zero
+            if amount < 1 {
+                context.setFillColor(base.cgColor)
+                CTFontDrawGlyphs(slot.font, &glyph, &origin, 1, context)
+            }
+            if amount > 0 {
+                if amount < 1 {
+                    context.saveGState()
+                    context.clip(to: CGRect(x: -1, y: -lineHeight * 0.6, width: slot.width * amount + 1, height: lineHeight * 1.8))
+                }
+                context.setFillColor(lit.cgColor)
+                CTFontDrawGlyphs(slot.font, &glyph, &origin, 1, context)
+                if amount < 1 { context.restoreGState() }
+            }
+            context.restoreGState()
+        }
+        context.restoreGState()
+        if motion, let last = layout.slots.last {
+            drawHeldNote(after: last, xHeight: xHeight, alpha: alpha)
+        }
+    }
+
+    /// 마지막 음절을 길게 끄는 동안 그 뒤로 작은 떨림 물결이 이어진다.
+    private func drawHeldNote(after slot: GlyphSlot, xHeight: CGFloat, alpha: CGFloat) {
+        guard style.karaoke, let cue, let elapsed = songElapsed, let end = cue.end,
+              let holdStart = cue.marks.last?.time, end - holdStart > 0.6 else { return }
+        let held = elapsed - holdStart - 0.25
+        guard held > 0, elapsed < end else { return }
+        let length = min(14, CGFloat(held) * 28)
+        guard length > 1.5 else { return }
+        let fade = CGFloat(min(1, (end - elapsed) / 0.2))
+        let startX = slot.x + slot.width + 2.5
+        let midY = slot.baseline - xHeight / 2
+        let amplitude = 1.1 + CGFloat(feeling.wave) * 1.2
+        let time = noteTime > 0 ? noteTime : now
+        let path = NSBezierPath()
+        let steps = max(2, Int(length / 0.75))
+        for step in 0...steps {
+            let x = length * CGFloat(step) / CGFloat(steps)
+            let swing = sin(Double(x) / 5 * 2 * .pi - time * 2 * .pi * 5.5)
+            let y = midY + CGFloat(swing) * amplitude * min(1, x / 4)
+            if step == 0 {
+                path.move(to: NSPoint(x: startX + x, y: y))
+            } else {
+                path.line(to: NSPoint(x: startX + x, y: y))
+            }
+        }
+        Self.sungColor.withAlphaComponent(0.8 * alpha * fade).setStroke()
+        path.lineWidth = 1.3
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
+    }
+
+    /// 박이 들어오면 말풍선이 눌렸다가 용수철처럼 튀어 오른다. 저음과 세기가 클수록 크게 출렁인다.
+    private func jellySquash() -> CGFloat {
+        let t = feeling.sinceBeat
+        guard t < 0.9 else { return 0 }
+        let strength = min(1, feeling.bass * 0.8 + feeling.wave * 0.45)
+        guard strength > 0.08 else { return 0 }
+        return CGFloat(strength * 0.05 * exp(-t / 0.16) * cos(t * 2 * .pi / 0.32))
+    }
+
+    /// 저음이 세게 들어온 박에는 말풍선 테두리에서 소리 고리가 퍼져 나간다.
+    private func drawSoundRing(_ path: NSBezierPath, hook: Bool) {
+        let t = feeling.sinceBeat
+        guard t < 0.5, feeling.bass > 0.5, feeling.wave > 0.4 else { return }
+        let spread = CGFloat(t / 0.5)
+        let strength = CGFloat(min(1, (feeling.bass - 0.5) * 2 + 0.35))
+        NSGraphicsContext.saveGraphicsState()
+        (hook ? Self.hookGold : Self.stroke).withAlphaComponent(0.34 * (1 - spread) * (1 - spread) * strength).setStroke()
+        path.lineWidth = 1.5 + spread * 8.5
+        path.lineJoinStyle = .round
+        path.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// 말풍선 아래 가운데에 지금 소리의 대역 세기를 좌우로 펼친다. 가운데가 저음, 바깥으로 갈수록 고음이다.
+    private func drawVoiceprint(dx: CGFloat, dy: CGFloat, bands: [Double], whisper: CGFloat, color: NSColor) {
+        let order = [7, 5, 3, 1, 0, 2, 4, 6]
+        let centerX = bounds.width / 2 + dx
+        let baseY = bounds.height - Self.outerPad - 3.2 + dy
+        let spacing: CGFloat = 3.2
+        let startX = centerX - CGFloat(order.count - 1) * spacing / 2
+        let path = NSBezierPath()
+        var energy: CGFloat = 0
+        for (slot, band) in order.enumerated() where band < bands.count {
+            let level = CGFloat(min(1, max(0, bands[band])))
+            energy = max(energy, level)
+            let half = min(2.7, 0.6 + level * 2.3 * (whisper > 0.3 ? 0.6 : 1))
+            let x = startX + CGFloat(slot) * spacing
+            path.move(to: NSPoint(x: x, y: baseY - half))
+            path.line(to: NSPoint(x: x, y: baseY + half))
+        }
+        color.withAlphaComponent(min(0.78, 0.3 + energy * 0.5)).setStroke()
+        path.lineWidth = 1.3
+        path.lineCapStyle = .round
+        path.stroke()
     }
 
     /// 부른 만큼만 보이도록 잘라서 같은 글을 채운 색으로 한 번 더 그린다. 두 줄이면 윗줄부터 채운다.

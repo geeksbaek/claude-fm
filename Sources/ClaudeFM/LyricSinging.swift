@@ -524,7 +524,8 @@ final class LyricSinging: ObservableObject {
             style: BubbleStyle(
                 karaoke: isKaraokeEnabled,
                 reactions: isReactionEnabled,
-                beatPeriod: beatPeriod?()
+                beatPeriod: beatPeriod?(),
+                feeling: isFeelingEnabled
             ),
             feeling: isFeelingEnabled ? currentFeeling : .calm,
             feelingEnabled: isFeelingEnabled,

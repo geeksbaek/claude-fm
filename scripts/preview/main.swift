@@ -83,6 +83,8 @@ struct BubbleCase {
     var elapsed: Double?
     var feeling = VocalFeeling.calm
     var style = BubbleStyle()
+    /// 음표·반짝임처럼 시계로 움직이는 것을 이만큼 앞당겨 그린다.
+    var noteOffset = 0.0
 }
 
 func line(_ text: String, next: String?, start: Double, end: Double, reaction: LyricReaction? = nil, hook: Bool = false) -> LyricCue {
@@ -91,6 +93,7 @@ func line(_ text: String, next: String?, start: Double, end: Double, reaction: L
     cue.end = end
     cue.reaction = reaction
     cue.isHook = hook
+    cue.marks = LyricInsight.phrasedMarks(text, start: start, end: end, rate: 4.5)
     return cue
 }
 
@@ -103,6 +106,22 @@ beatFeeling.wave = 0.5
 var shoutFeeling = VocalFeeling.calm
 shoutFeeling.shout = 0.75
 shoutFeeling.wave = 0.8
+shoutFeeling.bass = 0.7
+shoutFeeling.sinceBeat = 0.12
+shoutFeeling.bands = [0.95, 0.9, 0.7, 0.75, 0.8, 0.7, 0.55, 0.4]
+var rippleFeeling = VocalFeeling.calm
+rippleFeeling.wave = 0.65
+rippleFeeling.bass = 0.45
+rippleFeeling.beat = 0.5
+rippleFeeling.sinceBeat = 0.16
+rippleFeeling.bands = [0.85, 0.7, 0.55, 0.5, 0.45, 0.35, 0.25, 0.15]
+var whisperFeeling = VocalFeeling.calm
+whisperFeeling.whisper = 0.7
+whisperFeeling.wave = 0.18
+whisperFeeling.bands = [0.3, 0.25, 0.3, 0.35, 0.25, 0.15, 0.1, 0.05]
+var heldFeeling = VocalFeeling.calm
+heldFeeling.wave = 0.55
+heldFeeling.bands = [0.5, 0.45, 0.5, 0.6, 0.55, 0.4, 0.3, 0.2]
 
 let bubbleCases: [BubbleCase] = [
     BubbleCase(name: "karaoke", cue: line("너를 처음 만난 그 날처럼", next: "별빛이 내린 밤", start: 10, end: 13, reaction: .love),
@@ -110,7 +129,13 @@ let bubbleCases: [BubbleCase] = [
     BubbleCase(name: "karaoke-two-lines", cue: line("아이 니드 유 투나잇 앤 에브리 나잇 비코즈 유어 마이 온리 원 앤 온리",
                                                     next: "돈트 고", start: 10, end: 16), elapsed: 14.2),
     BubbleCase(name: "hook", cue: line("반짝반짝 빛나는 별처럼", next: "우리 함께라면", start: 30, end: 33, reaction: .star, hook: true),
-               elapsed: 31.0, feeling: beatFeeling),
+               elapsed: 31.0, feeling: beatFeeling, noteOffset: 0.8),
+    BubbleCase(name: "ripple", cue: line("오늘 밤 우리 함께 춤을 춰요", next: "끝나지 않게", start: 50, end: 53),
+               elapsed: 51.1, feeling: rippleFeeling),
+    BubbleCase(name: "whisper", cue: line("조용히... 너를 불러", next: nil, start: 60, end: 63), elapsed: 61.0,
+               feeling: whisperFeeling),
+    BubbleCase(name: "held-note", cue: line("사랑해", next: "오래오래", start: 70, end: 73.2, reaction: .love), elapsed: 72.6,
+               feeling: heldFeeling),
     BubbleCase(name: "countdown", cue: countdownCue, elapsed: 18.8, style: BubbleStyle(karaoke: true, reactions: true, beatPeriod: 0.5)),
     BubbleCase(name: "title", cue: .title("Supernova", artist: "aespa"), elapsed: nil),
     BubbleCase(name: "recap", cue: recapCue, elapsed: nil),
@@ -128,7 +153,7 @@ MainActor.assumeIsolated {
         let layout = BubbleView.layout(for: item.cue)
         view.frame = NSRect(origin: .zero, size: layout.size)
         view.frozenTime = freeze
-        view.noteTime = freeze
+        view.noteTime = freeze + item.noteOffset
         view.cueShownAt = freeze - 2
         var feeling = item.feeling
         feeling.phase = freeze

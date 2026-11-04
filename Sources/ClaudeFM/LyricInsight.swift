@@ -21,8 +21,42 @@ enum LyricInsight {
                 sing = syllables / rate * 1.08
             }
             let limit = gap > 0.6 ? gap - 0.08 : gap * 0.9
-            lines[index].end = lines[index].time + min(max(sing, min(0.5, limit)), max(limit, 0.2))
+            let end = lines[index].time + min(max(sing, min(0.5, limit)), max(limit, 0.2))
+            lines[index].end = end
+            if lines[index].marks.isEmpty {
+                lines[index].marks = phrasedMarks(lines[index].text, start: lines[index].time, end: end, rate: rate)
+            }
         }
+    }
+
+    /// 낱말 시각이 없는 줄을 부르는 모양대로 음절마다 나눈다. 줄 몸통은 고른 빠르기로 부르고,
+    /// 낱말 끝과 쉼표 앞에서 조금 머물고, 마지막 음절은 길게 끈다. 빠른 곡일수록 덜 끈다.
+    /// 비율은 낱말 시각(`wordMarks`)과 같이 글자(문자·숫자) 수로 센다.
+    static func phrasedMarks(_ text: String, start: TimeInterval, end: TimeInterval, rate: Double) -> [LyricMark] {
+        let chars = Array(text)
+        var weights: [Double] = []
+        for (index, char) in chars.enumerated() where char.isLetter || char.isNumber {
+            var weight = 1.0
+            if index + 1 < chars.count {
+                let next = chars[index + 1]
+                if next.isWhitespace {
+                    weight = 1.15
+                } else if ",.!?~…、。，！？".contains(next) {
+                    weight = 1.5
+                }
+            }
+            weights.append(weight)
+        }
+        guard weights.count >= 2, end - start >= 0.6 else { return [] }
+        weights[weights.count - 1] = min(2.8, max(1.3, 2.6 - (rate - 3) * 0.25))
+        let unit = (end - start) / weights.reduce(0, +)
+        var marks: [LyricMark] = []
+        var time = start
+        for index in 0..<(weights.count - 1) {
+            time += weights[index] * unit
+            marks.append(LyricMark(time: time, fraction: Double(index + 1) / Double(weights.count)))
+        }
+        return marks
     }
 
     /// 쉼 없이 부르는 줄은 다음 줄까지 거의 꽉 차므로, 빠른 쪽 줄들의 빠르기가 그 곡의 빠르기다.
