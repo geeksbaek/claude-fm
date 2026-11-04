@@ -269,8 +269,13 @@ var daily = DailyRhythm(day: "", seconds: 0, beats: 0)
 daily = daily.adding(seconds: 30, beats: 60, on: morning, calendar: utc)
 check(daily.summary(on: morning, calendar: utc) == nil, "1분이 안 되면 숨긴다")
 daily = daily.adding(seconds: 4_300, beats: 8_180, on: morning, calendar: utc)
-check(daily.summary(on: morning, calendar: utc) == "오늘 Clawd 와 1시간 12분 동안 8,240박을 탔어요",
+check(daily.summary(on: morning, calendar: utc) == "오늘 Clawd 와 1시간 12분 · 8,240박",
       "오늘의 리듬 \(daily.summary(on: morning, calendar: utc) ?? "nil")")
+daily = daily.adding(seconds: 0, beats: 0, songs: 3, on: morning, calendar: utc)
+check(daily.summary(on: morning, calendar: utc) == "오늘 Clawd 와 1시간 12분 · 8,240박 · 3곡 완주",
+      "끝까지 들은 노래 \(daily.summary(on: morning, calendar: utc) ?? "nil")")
+let legacy = try! JSONDecoder().decode(DailyRhythm.self, from: Data(#"{"day":"2026-11-04","seconds":90,"beats":120}"#.utf8))
+check(legacy.songs == 0 && legacy.beats == 120, "예전 기록도 읽는다")
 let tomorrow = morning.addingTimeInterval(86_400)
 check(daily.summary(on: tomorrow, calendar: utc) == nil, "날짜가 바뀌면 어제 기록은 보이지 않는다")
 let fresh = daily.adding(seconds: 90, beats: 120, on: tomorrow, calendar: utc)

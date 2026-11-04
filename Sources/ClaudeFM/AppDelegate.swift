@@ -76,7 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             guard let self, self.singing.isReactionEnabled, !self.singing.hasSyncedLyrics else { return }
             self.celebrate(nil)
         }
-        singing.onSongFinished = { [weak self] nextStarted in self?.applaud(banner: !nextStarted) }
+        singing.onSongFinished = { [weak self] nextStarted in
+            self?.rhythm.countFinishedSong()
+            self?.applaud(banner: !nextStarted)
+        }
         stage.onVisibilityChange = { [weak self] open in
             self?.singing.setStageActive(open)
             self?.syncAnimation()

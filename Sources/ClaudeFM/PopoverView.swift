@@ -54,7 +54,7 @@ struct PopoverView: View {
                     PopoverLyricLine(scene: singing.scene(at: ProcessInfo.processInfo.systemUptime),
                                      karaoke: singing.isKaraokeEnabled)
                 }
-                .frame(height: 18)
+                .frame(height: 24)
             }
 
             HStack(spacing: 8) {
@@ -227,7 +227,25 @@ struct PopoverLyricLine: View {
     private static let sung = Color(nsColor: NSColor(srgbRed: 0.85, green: 0.47, blue: 0.34, alpha: 1))
 
     var body: some View {
-        if let scene, let line = shown(scene) {
+        VStack(alignment: .leading, spacing: 4) {
+            lyric
+            // 곡이 얼마나 흘렀는지 가는 막대로.
+            if let progress = scene?.progress(at: ProcessInfo.processInfo.systemUptime) {
+                GeometryReader { proxy in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.18))
+                        Capsule().fill(Self.sung.opacity(0.85))
+                            .frame(width: max(2, proxy.size.width * CGFloat(progress)))
+                    }
+                }
+                .frame(height: 2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var lyric: some View {
+        if let line = shown(scene) {
             HStack(spacing: 6) {
                 Text(line.icon)
                     .font(.system(size: 12, weight: .bold))
@@ -266,12 +284,15 @@ struct PopoverLyricLine: View {
         var dim: Bool
     }
 
-    private func shown(_ scene: LyricPerformance) -> Shown? {
+    /// 줄을 부르는 동안은 그 줄을, 아니면 지금 상태를 흐리게 보여 준다.
+    private func shown(_ scene: LyricPerformance?) -> Shown? {
+        guard let scene else { return Shown(icon: "♪", text: "잠시 멈췄어요", progress: nil, dim: true) }
         let cue = scene.cue
-        if cue.isTitle || cue.isHumming || cue.recap != nil { return nil }
+        if cue.isTitle { return Shown(icon: "♪", text: "전주가 흐르는 중", progress: nil, dim: true) }
+        if cue.isHumming { return Shown(icon: "♪", text: "가사를 몰라서 흥얼거리는 중", progress: nil, dim: true) }
+        if let recap = cue.recap { return Shown(icon: "♪", text: recap.headline + " · " + recap.caption, progress: nil, dim: true) }
         if cue.isInterlude {
-            guard let next = cue.next else { return nil }
-            return Shown(icon: "♪", text: next, progress: nil, dim: true)
+            return Shown(icon: "♪", text: cue.next.map { "다음: " + $0 } ?? "간주가 흐르는 중", progress: nil, dim: true)
         }
         let elapsed = scene.clock?.elapsed(at: ProcessInfo.processInfo.systemUptime)
         let progress = karaoke ? elapsed.flatMap { cue.progress(at: $0) } : nil

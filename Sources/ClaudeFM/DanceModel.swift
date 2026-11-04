@@ -103,11 +103,27 @@ enum Animation {
     }
 }
 
-/// 오늘 Clawd 와 함께 춤춘 시간과 박 수. 날짜가 바뀌면 새로 센다. 숫자만 남긴다.
+/// 오늘 Clawd 와 함께 춤춘 시간과 박 수, 끝까지 들은 노래 수. 날짜가 바뀌면 새로 센다. 숫자만 남긴다.
 struct DailyRhythm: Codable, Equatable {
     var day: String
     var seconds: Double
     var beats: Int
+    var songs = 0
+
+    init(day: String, seconds: Double, beats: Int, songs: Int = 0) {
+        self.day = day
+        self.seconds = seconds
+        self.beats = beats
+        self.songs = songs
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        day = try container.decode(String.self, forKey: .day)
+        seconds = try container.decode(Double.self, forKey: .seconds)
+        beats = try container.decode(Int.self, forKey: .beats)
+        songs = try container.decodeIfPresent(Int.self, forKey: .songs) ?? 0
+    }
 
     static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
@@ -115,20 +131,27 @@ struct DailyRhythm: Codable, Equatable {
     }
 
     /// 오늘 몫을 더한다. 날짜가 바뀌었으면 어제 몫은 버리고 새로 시작한다.
-    func adding(seconds extra: Double, beats more: Int, on date: Date, calendar: Calendar = .current) -> DailyRhythm {
+    func adding(seconds extra: Double, beats more: Int, songs finished: Int = 0, on date: Date,
+                calendar: Calendar = .current) -> DailyRhythm {
         let today = Self.dayKey(date, calendar: calendar)
         let base = day == today ? self : DailyRhythm(day: today, seconds: 0, beats: 0)
-        return DailyRhythm(day: today, seconds: base.seconds + max(0, extra), beats: base.beats + max(0, more))
+        return DailyRhythm(day: today, seconds: base.seconds + max(0, extra), beats: base.beats + max(0, more),
+                           songs: base.songs + max(0, finished))
     }
 
-    /// 팝오버에 쓰는 한 줄. 1분이 안 되면 nil.
+    /// 팝오버에 쓰는 한 줄. 1분도 안 춤췄고 끝까지 들은 노래도 없으면 nil.
     func summary(on date: Date, calendar: Calendar = .current) -> String? {
-        guard day == Self.dayKey(date, calendar: calendar), seconds >= 60 else { return nil }
-        let minutes = Int(seconds / 60)
-        let time = minutes >= 60 ? "\(minutes / 60)시간 \(minutes % 60)분" : "\(minutes)분"
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        let count = formatter.string(from: NSNumber(value: beats)) ?? "\(beats)"
-        return "오늘 Clawd 와 \(time) 동안 \(count)박을 탔어요"
+        guard day == Self.dayKey(date, calendar: calendar), seconds >= 60 || songs > 0 else { return nil }
+        var parts: [String] = []
+        if seconds >= 60 {
+            let minutes = Int(seconds / 60)
+            let time = minutes >= 60 ? "\(minutes / 60)시간 \(minutes % 60)분" : "\(minutes)분"
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            let count = formatter.string(from: NSNumber(value: beats)) ?? "\(beats)"
+            parts.append("\(time) · \(count)박")
+        }
+        if songs > 0 { parts.append("\(songs)곡 완주") }
+        return "오늘 Clawd 와 " + parts.joined(separator: " · ")
     }
 }

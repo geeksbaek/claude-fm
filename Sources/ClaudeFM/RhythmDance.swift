@@ -153,6 +153,12 @@ final class RhythmDance: ObservableObject {
         return saved
     }
 
+    /// 끝까지 들은 노래를 하나 센다.
+    func countFinishedSong() {
+        today = today.adding(seconds: 0, beats: 0, songs: 1, on: Date())
+        flushDaily(save: true)
+    }
+
     /// 모아 둔 춤 시간을 오늘 기록에 더한다. 날짜가 바뀌었으면 새로 센다.
     private func flushDaily(save: Bool) {
         let next = today.adding(seconds: pendingSeconds, beats: pendingBeats, on: Date())
