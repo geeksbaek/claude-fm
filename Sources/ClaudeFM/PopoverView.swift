@@ -269,7 +269,7 @@ struct PopoverLyricLine: View {
                                     .foregroundStyle(Self.sung)
                                     .frame(width: proxy.size.width, alignment: .leading)
                                     .mask(alignment: .leading) {
-                                        Rectangle().frame(width: proxy.size.width * CGFloat(progress))
+                                        Rectangle().frame(width: proxy.size.width * Self.widthFraction(line.text, progress))
                                     }
                             }
                         }
@@ -282,6 +282,15 @@ struct PopoverLyricLine: View {
                 Spacer(minLength: 0)
             }
         }
+    }
+
+    /// 글자 수로 센 채움을 이 줄 글꼴의 폭 비율로 바꾼다. 띄어쓰기에서는 채움이 머물지 않는다.
+    private static func widthFraction(_ text: String, _ progress: Double) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        let measure: (String) -> Double = { Double(($0 as NSString).size(withAttributes: [.font: font]).width) }
+        let full = measure(text)
+        guard full > 0 else { return CGFloat(progress) }
+        return CGFloat(min(1, KaraokeText.sungWidth(text, progress: progress, measure: measure) / full))
     }
 
     private struct Shown {
