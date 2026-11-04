@@ -31,6 +31,9 @@ final class RhythmDance: ObservableObject {
     private var heardAudio = false
     private var silenceWhileRunning: TimeInterval = 0
     private var lastAccess: Int?
+    /// 무대를 TV 로 보내느라 탭을 음소거로 열어 둔 중.
+    private var sendingSound = false
+    private var mutedHere = false
     private let debug = ProcessInfo.processInfo.environment["CLAUDE_FM_DEBUG"] != nil
     private var lastDebugLog = 0.0
 
@@ -61,7 +64,9 @@ final class RhythmDance: ObservableObject {
     }
 
     func feeling(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> VocalFeeling {
-        clock.feeling(at: time)
+        var feeling = clock.feeling(at: time)
+        feeling.bands = meter.levels(at: time)
+        return feeling
     }
 
     /// 무대 전광판에 쓰는 옥타브 대역 세기(0...1).
@@ -90,6 +95,40 @@ final class RhythmDance: ObservableObject {
     func refreshAccess() {
         pollAccess()
     }
+
+    /// 무대를 TV 로 보내는 동안 시스템 소리를 `ring` 으로 넘긴다. 이 Mac 소리는 TV 가 실제로 틀기 시작할 때
+    /// `muteHere()` 로 끈다. 연결하고 허용을 기다리는 동안 어디에서도 소리가 안 나는 일이 없게 한다.
+    /// 권한이 없으면 탭이 0 만 주므로, 권한을 확인한 뒤에만 보낸다.
+    func sendSound(to ring: StageAudioRing) -> CastSound {
+        guard #available(macOS 14.2, *) else { return .unsupported }
+        let status = SystemAudioAccess.preflight()
+        guard status == 0 || (status == nil && heardAudio) else { return .needsPermission }
+        tap.setSink(ring)
+        sendingSound = true
+        if tap.sampleRate == nil { tap.start(muted: false) }
+        return .sending
+    }
+
+    /// TV 가 소리를 틀기 시작했다. 이 Mac 에서는 끈다. 탭이 도는 동안만 꺼지므로 앱이 죽어도 소리가 돌아온다.
+    func muteHere() {
+        guard sendingSound, !mutedHere, #available(macOS 14.2, *) else { return }
+        mutedHere = true
+        tap.start(muted: true)
+    }
+
+    /// TV 로 보내기를 마쳤다. 이 Mac 소리를 되돌린다.
+    func keepSoundHere() {
+        tap.setSink(nil)
+        guard sendingSound else { return }
+        sendingSound = false
+        guard mutedHere else { return }
+        mutedHere = false
+        guard #available(macOS 14.2, *) else { return }
+        tap.start(muted: false)
+    }
+
+    /// 지금 오디오 탭의 표본율.
+    var tapSampleRate: Double? { tap.sampleRate }
 
     static func openSettings() {
         let urls = [
@@ -135,7 +174,7 @@ final class RhythmDance: ObservableObject {
             lastDailyFlush = now
             flushDaily(save: now - lastDailySave >= 30)
         }
-        onFeelingChange?(clock.feeling(at: now))
+        onFeelingChange?(feeling(at: now))
         if clock.surgeCount != surgesBefore { onSurge?() }
         guard debug, now - lastDebugLog > 1 else { return }
         lastDebugLog = now

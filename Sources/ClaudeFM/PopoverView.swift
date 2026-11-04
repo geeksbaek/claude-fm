@@ -4,6 +4,7 @@ struct PopoverView: View {
     @ObservedObject var player: RadioPlayer
     @ObservedObject var rhythm: RhythmDance
     @ObservedObject var singing: LyricSinging
+    @ObservedObject var caster: StageCaster
     /// 팝오버를 닫고 무대 창을 연다.
     let openStage: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -93,6 +94,15 @@ struct PopoverView: View {
                     .lineLimit(1)
             }
 
+            // TV 로 보내는 동안에는 어디로 보내는지와 소리가 어디서 나는지 적는다.
+            if let line = caster.statusLine {
+                Label(line, systemImage: caster.isCasting ? "tv.fill" : "tv")
+                    .font(.system(size: 11))
+                    .foregroundStyle(caster.isActive ? Color.accentColor : Color.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
             Divider()
 
             HStack(spacing: 12) {
@@ -100,6 +110,10 @@ struct PopoverView: View {
                     Label("무대", systemImage: "music.note.tv")
                 }
                 .help("Clawd 의 콘서트 무대를 엽니다")
+                Button { caster.popUpMenuAtMouse() } label: {
+                    Label("TV", systemImage: caster.isActive ? "tv.fill" : "tv")
+                }
+                .help(caster.isActive ? caster.menuTitle : "같은 Wi-Fi 의 크롬캐스트로 무대를 보냅니다")
                 Spacer()
                 Button("YouTube에서 열기") { NSWorkspace.shared.open(RadioPlayer.watchURL) }
                 Button("종료") { NSApp.terminate(nil) }
@@ -269,7 +283,7 @@ struct PopoverLyricLine: View {
                                     .foregroundStyle(Self.sung)
                                     .frame(width: proxy.size.width, alignment: .leading)
                                     .mask(alignment: .leading) {
-                                        Rectangle().frame(width: proxy.size.width * CGFloat(progress))
+                                        Rectangle().frame(width: proxy.size.width * Self.widthFraction(line.text, progress))
                                     }
                             }
                         }
@@ -282,6 +296,15 @@ struct PopoverLyricLine: View {
                 Spacer(minLength: 0)
             }
         }
+    }
+
+    /// 글자 수로 센 채움을 이 줄 글꼴의 폭 비율로 바꾼다. 띄어쓰기에서는 채움이 머물지 않는다.
+    private static func widthFraction(_ text: String, _ progress: Double) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        let measure: (String) -> Double = { Double(($0 as NSString).size(withAttributes: [.font: font]).width) }
+        let full = measure(text)
+        guard full > 0 else { return CGFloat(progress) }
+        return CGFloat(min(1, KaraokeText.sungWidth(text, progress: progress, measure: measure) / full))
     }
 
     private struct Shown {

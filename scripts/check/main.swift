@@ -162,6 +162,46 @@ if let cue = enhancedSong.cue(at: 10.5) {
     check(p2 > p1 && p2 < 0.75, "둘째 낱말 중간 \(p2)")
 }
 
+// 낱말 시각이 없는 줄은 부르는 모양대로 채운다. 몸통은 고르게 빨리, 마지막 음절은 길게 끈다.
+let phrased = LyricInsight.phrasedMarks("너를 처음 만난 그 날처럼", start: 10, end: 13, rate: 4.5)
+check(phrased.count == 9, "음절 표시 수 \(phrased.count)")
+check(zip(phrased, phrased.dropFirst()).allSatisfy { $0.time < $1.time && $0.fraction < $1.fraction }, "음절 표시는 앞으로만 간다")
+if let last = phrased.last, let first = phrased.first {
+    let body = (last.time - 10) / 9
+    check(13 - last.time > body * 1.8, "마지막 음절은 길게 끈다 \(13 - last.time) / \(body)")
+    check(first.time - 10 < 0.3, "첫 음절은 곡 빠르기보다 조금 빠르다 \(first.time - 10)")
+}
+let gapMarks = LyricInsight.phrasedMarks("하나, 둘", start: 0, end: 2, rate: 4.5)
+if gapMarks.count == 2 {
+    check(gapMarks[1].time - gapMarks[0].time > gapMarks[0].time, "쉼표 앞 음절은 조금 머문다 \(gapMarks)")
+}
+check(LyricInsight.phrasedMarks("아", start: 0, end: 2, rate: 4.5).isEmpty, "한 음절 줄은 고르게")
+let fastHold = LyricInsight.phrasedMarks("가나다라마바사", start: 0, end: 2, rate: 8)
+let slowHold = LyricInsight.phrasedMarks("가나다라마바사", start: 0, end: 2, rate: 3)
+check((2 - (fastHold.last?.time ?? 0)) < (2 - (slowHold.last?.time ?? 0)), "빠른 곡일수록 덜 끈다")
+if let cue = song.cue(at: 6) {
+    check(!cue.marks.isEmpty, "시각 없는 줄도 음절 표시가 생긴다")
+    let early = cue.progress(at: (cue.start ?? 5) + ((cue.end ?? 8) - (cue.start ?? 5)) * 0.5) ?? 0
+    check(early > 0.55, "줄 가운데쯤이면 절반 넘게 불렀다 \(early)")
+}
+
+// 채움 비율은 글자 수로 세고, 띄어쓰기 폭은 건너뛴다. 글자 하나 폭 2, 띄어쓰기 폭 1 로 잰다.
+let measure: (String) -> Double = { text in text.reduce(0) { $0 + ($1 == " " ? 1 : 2) } }
+check(near(KaraokeText.sungWidth("가나 다라", progress: 0.5, measure: measure), 5), "두 글자와 뒤 띄어쓰기까지 부른 폭 \(KaraokeText.sungWidth("가나 다라", progress: 0.5, measure: measure))")
+check(near(KaraokeText.sungWidth("가나 다라", progress: 0.625, measure: measure), 6), "셋째 글자 절반 \(KaraokeText.sungWidth("가나 다라", progress: 0.625, measure: measure))")
+check(near(KaraokeText.sungWidth("가나 다라", progress: 1, measure: measure), 9), "다 부르면 전체 폭")
+check(KaraokeText.sungWidth("!!", progress: 0.5, measure: measure) == 0, "글자 없는 줄은 0")
+
+// 간주 음표 흐름은 빠르기가 바뀌어도 맥이 오래 켜져 있어도 튀지 않는다.
+var flow = FlowClock()
+_ = flow.advance(to: 300_000, speed: 0.28)
+let flowA = flow.advance(to: 300_000.016, speed: 0.36)
+check(abs(flowA - 0.016 * 0.36) < 1e-6, "한 프레임에 조금만 흐른다 \(flowA)")
+check(flow.advance(to: 300_000.016, speed: 0.30) == flowA, "같은 시각에는 그대로")
+let flowB = flow.advance(to: 300_100, speed: 0.3)
+check(abs(flowB - flowA - 0.03) < 1e-6, "오래 쉬어도 한 번에 0.1초만 \(flowB - flowA)")
+check(flow.advance(to: 299_000, speed: 0.3) == flowB, "시각이 거꾸로 가면 멈춘다")
+
 // 거의 모든 줄이 되풀이되는 곡은 가장 많이 되풀이되는 줄만 후렴으로 본다.
 var loopLRC = ""
 let loopLines = ["춤을 춰 춤을 춰요", "밤새도록 춤을 춰", "춤을 춰 춤을 춰요", "밤새도록 춤을 춰",

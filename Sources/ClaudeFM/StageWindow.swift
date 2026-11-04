@@ -1,41 +1,22 @@
 import AppKit
 
-/// 무대가 프레임마다 앱에서 읽어 오는 것.
-struct StageSnapshot {
-    var pose = DancePose.idle
-    /// Claude FM 을 듣는 중.
-    var playing = false
-    var accent = SpriteAccent.none
-    var feeling = VocalFeeling.calm
-    var spectrum: [Double] = []
-    var beatCount = 0
-    var beatPhase = 0.0
-    var beatPeriod: Double?
-    var bpm: Int?
-    var mood = MusicMood.quiet
-    var performance: LyricPerformance?
-    var karaoke = true
-    var reactions = true
-    /// Claude FM 영상 제목.
-    var radioTitle = "Claude FM"
-    /// 시스템 오디오 권한이 없어 소리를 못 듣는 중.
-    var needsPermission = false
-}
-
-/// 콘서트 무대 창. 픽셀 무대 위에 가사와 곡 정보를 얹는다.
+/// 콘서트 무대 창. 픽셀 무대 위에 가사와 곡 정보를 얹는다. 장면은 TV 와 같이 쓰는 감독이 들고 있다.
 @MainActor
 final class StageWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var stageView: StageView?
     private var occlusionObserver: NSObjectProtocol?
-    private let snapshot: () -> StageSnapshot
+    let director: StageDirector
+    private var castStatus = StageCastBadge.Status.idle
     /// 무대가 열리고 닫힐 때. 말풍선을 숨기고 가사를 찾게 한다.
     var onVisibilityChange: ((Bool) -> Void)?
     var onTogglePlayback: (() -> Void)?
     var onNudgeSync: ((Double) -> Void)?
+    /// TV 단추를 누르거나 t 를 눌렀을 때. 단추 아래에 기기 목록을 띄운다.
+    var onCastMenu: ((NSView) -> Void)?
 
-    init(snapshot: @escaping () -> StageSnapshot) {
-        self.snapshot = snapshot
+    init(director: StageDirector) {
+        self.director = director
     }
 
     var isOpen: Bool { window?.isVisible == true }
@@ -65,20 +46,18 @@ final class StageWindowController: NSObject, NSWindowDelegate {
         onVisibilityChange?(true)
     }
 
-    func celebrate(_ reaction: LyricReaction?) {
-        stageView?.burst(reaction: reaction)
-    }
-
     func noteSync(_ offset: Double) {
-        stageView?.flashSync(offset)
+        director.flashSync(offset)
     }
 
-    func showToast(_ text: String) {
-        stageView?.toast(text)
+    func showToast(_ text: String, onTV: Bool = true, seconds: TimeInterval = 1.8) {
+        director.toast(text, onTV: onTV, seconds: seconds)
     }
 
-    func encore(banner: Bool) {
-        stageView?.encore(banner: banner)
+    /// TV 단추에 지금 보내는 상태를 적는다.
+    func updateCast(_ status: StageCastBadge.Status) {
+        castStatus = status
+        stageView?.castStatus = status
     }
 
     private func makeWindow() -> NSWindow {
@@ -97,9 +76,11 @@ final class StageWindowController: NSObject, NSWindowDelegate {
         window.minSize = NSSize(width: 480, height: 270)
         window.isReleasedWhenClosed = false
         window.delegate = self
-        let view = StageView(frame: NSRect(x: 0, y: 0, width: 960, height: 540), snapshot: snapshot)
+        let view = StageView(frame: NSRect(x: 0, y: 0, width: 960, height: 540), director: director)
         view.onTogglePlayback = { [weak self] in self?.onTogglePlayback?() }
         view.onNudgeSync = { [weak self] seconds in self?.onNudgeSync?(seconds) }
+        view.onCastMenu = { [weak self] anchor in self?.onCastMenu?(anchor) }
+        view.castStatus = castStatus
         window.contentView = view
         window.center()
         window.setFrameAutosaveName("ClaudeFMStage")
@@ -120,36 +101,35 @@ final class StageWindowController: NSObject, NSWindowDelegate {
     }
 }
 
-/// 픽셀 무대와 글자 층을 겹친 뷰. 열려 있고 보이는 동안 1/60초마다 다시 그린다.
+/// 픽셀 무대와 글자 층을 겹친 뷰. 열려 있고 보이는 동안 1/60초마다 감독에게 장면을 받아 다시 그린다.
 @MainActor
 final class StageView: NSView {
-    private let snapshot: () -> StageSnapshot
+    private let director: StageDirector
     private let pixelLayer = CALayer()
     private let hud = StageHUDView()
+    private let castBadge = StageCastBadge()
     private var canvas = RasterCanvas(width: 320, height: 180)
     private var pixelScale = 4
     private var timer: Timer?
     private var lastTick: TimeInterval = 0
-    private var bursts: [StageBurst] = []
-    private var shownReaction: LyricReaction?
-    private var reactionLevel = 0.0
-    private var hookLevel = 0.0
-    private var lastCueKey: String?
-    private var cueStartedAt: TimeInterval = 0
     private var lastMouseMove: TimeInterval = -10
-    private var toastText = ""
-    private var toastShownAt: TimeInterval = -10
-    private var cheerUntil: TimeInterval = -10
-    private var shakeStartedAt: TimeInterval = -10
-    private var shakeStrength = 0.0
-    private var splashLevel = 0.0
-    private var bannerUntil: TimeInterval = -10
     private var trackingArea: NSTrackingArea?
     var onTogglePlayback: (() -> Void)?
     var onNudgeSync: ((Double) -> Void)?
+    var onCastMenu: ((NSView) -> Void)?
 
-    init(frame: NSRect, snapshot: @escaping () -> StageSnapshot) {
-        self.snapshot = snapshot
+    var castStatus = StageCastBadge.Status.idle {
+        didSet {
+            guard castStatus != oldValue else { return }
+            castBadge.status = castStatus
+            // 상태가 바뀌면 단추를 잠깐 또렷이 보여 준다.
+            lastMouseMove = ProcessInfo.processInfo.systemUptime
+            layoutBadge()
+        }
+    }
+
+    init(frame: NSRect, director: StageDirector) {
+        self.director = director
         super.init(frame: frame)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
@@ -164,6 +144,10 @@ final class StageView: NSView {
         hud.frame = bounds
         hud.autoresizingMask = [.width, .height]
         addSubview(hud)
+        castBadge.isHidden = true
+        castBadge.alphaValue = 0
+        castBadge.onPress = { [weak self] in self?.openCastMenu() }
+        addSubview(castBadge)
     }
 
     @available(*, unavailable)
@@ -176,6 +160,7 @@ final class StageView: NSView {
 
     func start() {
         layoutCanvas()
+        layoutBadge()
         // 창이 막 열린 참이라 가림 상태가 아직 갱신되지 않았을 수 있다. 일단 돌리고, 가려지면 그때 쉰다.
         startTimer()
         tick()
@@ -184,6 +169,7 @@ final class StageView: NSView {
     func stop() {
         timer?.invalidate()
         timer = nil
+        director.referenceWidth = 320
     }
 
     /// 창이 가려지면 쉬고, 다시 보이면 이어 그린다.
@@ -206,53 +192,10 @@ final class StageView: NSView {
         self.timer = timer
     }
 
-    /// 무대 양옆에서 위로 쏘고, 가운데 위에서 쏟아지는 폭죽.
-    func burst(reaction: LyricReaction?) {
-        let w = Double(canvas.width), h = Double(canvas.height)
-        let colors = MoodPalette.of(snapshot().mood == .quiet ? .groove : snapshot().mood).confetti
-        let seed = Int(ProcessInfo.processInfo.systemUptime * 1000) % 100_000
-        // '동작 줄이기'를 켰으면 폭죽을 줄이고 흔들지 않는다.
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let count = max(30, canvas.width / 6) / (reduceMotion ? 3 : 1)
-        bursts.append(StageBurst(burst: ConfettiBurst(originX: w * 0.08, originY: h * 0.98, scale: 0.9, count: count, seed: seed,
-                                                      colors: colors, glyph: reaction, upward: true), age: 0))
-        bursts.append(StageBurst(burst: ConfettiBurst(originX: w * 0.92, originY: h * 0.98, scale: 0.9, count: count, seed: seed + 77,
-                                                      colors: colors, glyph: reaction, upward: true), age: 0))
-        bursts.append(StageBurst(burst: ConfettiBurst(originX: w * 0.5, originY: -4, scale: 0.6, count: count, seed: seed + 151,
-                                                      colors: colors, glyph: reaction, upward: false), age: -0.25))
-        if !reduceMotion { shake(1) }
-        cheer(for: 2.4)
-    }
-
-    func flashSync(_ offset: Double) {
-        let text = abs(offset) < 0.05 ? "가사 싱크 맞춤" : String(format: "가사 %@ %.1f초", offset > 0 ? "늦게" : "빠르게", abs(offset))
-        toast(text)
-    }
-
-    func toast(_ text: String) {
-        toastText = text
-        toastShownAt = ProcessInfo.processInfo.systemUptime
-    }
-
-    /// 무대가 쿵 하고 짧게 흔들린다.
-    private func shake(_ strength: Double) {
-        shakeStartedAt = ProcessInfo.processInfo.systemUptime
-        shakeStrength = strength
-    }
-
-    /// 곡이 끝까지 흐르면 관객이 환호하고, 다음 곡이 없으면 전광판에 ENCORE 를 띄운다.
-    func encore(banner: Bool) {
-        cheer(for: 3.2)
-        if banner { bannerUntil = ProcessInfo.processInfo.systemUptime + 3.6 }
-    }
-
-    private func cheer(for seconds: TimeInterval) {
-        cheerUntil = max(cheerUntil, ProcessInfo.processInfo.systemUptime + seconds)
-    }
-
     override func layout() {
         super.layout()
         layoutCanvas()
+        layoutBadge()
     }
 
     /// 높이 180 칸 안팎이 되도록 정수 배율을 고른다. 칸이 고르게 커져야 픽셀이 흔들리지 않는다.
@@ -274,138 +217,58 @@ final class StageView: NSView {
         CATransaction.commit()
     }
 
+    /// TV 단추는 오른쪽 위 빠르기·분위기 칩 아래에 둔다. 제목 막대 아래라 눌러도 창이 끌리지 않는다.
+    private func layoutBadge() {
+        let unit = max(0.6, min(1.6, bounds.height / 540))
+        castBadge.unit = unit
+        let size = castBadge.preferredSize
+        castBadge.frame = NSRect(x: (bounds.width - 22 * unit - size.width).rounded(),
+                                 y: (bounds.height - 65 * unit - size.height).rounded(),
+                                 width: size.width, height: size.height)
+    }
+
     private func tick() {
         let now = ProcessInfo.processInfo.systemUptime
         // 저전력 모드에서는 초당 30번만 그린다.
         if ProcessInfo.processInfo.isLowPowerModeEnabled, now - lastTick < 1.0 / 40 { return }
-        let dt = min(0.1, max(0, now - lastTick))
         lastTick = now
-        let state = snapshot()
-        let cue = state.performance?.cue
-        let sungLine = cue.map { !$0.isInterlude && !$0.isHumming && !$0.isTitle && $0.recap == nil } ?? false
-
-        // 가사 반응과 후렴은 서서히 켜고 끈다. 꺼질 때도 마지막 반응이 흐려지며 사라진다.
-        let wantReaction = state.reactions && sungLine ? cue?.reaction : nil
-        if let wantReaction {
-            if wantReaction != shownReaction {
-                shownReaction = wantReaction
-                reactionLevel = min(reactionLevel, 0.2)
-            }
-            reactionLevel = min(1, reactionLevel + dt / 0.6)
-        } else {
-            reactionLevel = max(0, reactionLevel - dt / 1.2)
-            if reactionLevel == 0 { shownReaction = nil }
-        }
-        let wantHook = state.reactions && sungLine && (cue?.isHook ?? false)
-        hookLevel = wantHook ? min(1, hookLevel + dt / 0.4) : max(0, hookLevel - dt / 1.5)
-
-        bursts = bursts.compactMap { item in
-            var item = item
-            item.age += dt
-            return item.age < ConfettiBurst.lifetime ? item : nil
-        }
-
-        let live = state.playing || state.pose.showsMotion || state.performance != nil
-        var pose = state.pose
-        if hookLevel > 0.5, pose.active { pose.style = .handsUp }
-        // 소리를 못 듣는 동안(권한이 없거나 아주 작을 때)에는 흥얼거리고, 전광판은 잔잔한 물결로 움직인다.
-        let hearing = state.pose.showsMotion || (state.spectrum.max() ?? 0) > 0.05
-        var spectrum = state.spectrum
-        if live, !hearing {
-            spectrum = (0..<SpectrumMeter.bandCount).map { band -> Double in
-                let offset = Double(band)
-                let slow: Double = sin(now * 2.1 + offset * 0.8)
-                let fast: Double = sin(now * 5.3 + offset * 2.1)
-                return 0.32 + 0.22 * slow + 0.08 * fast
-            }
-        }
-        var input = StageInput()
-        input.time = now
-        input.spriteFrame = Animation.frame(at: Date())
-        input.pose = pose
-        input.playing = state.playing || (live && !hearing)
-        input.accent = state.accent
-        input.feeling = state.feeling
-        input.spectrum = spectrum
-        input.beatCount = state.beatCount
-        input.beatPhase = state.beatPhase
-        input.reaction = shownReaction
-        input.reactionLevel = reactionLevel
-        input.hookLevel = hookLevel
-        input.bursts = bursts
-        input.hour = Calendar.current.component(.hour, from: Date())
-        input.live = live
-        input.cheer = cheerUntil > now ? min(1, (cheerUntil - now) / 0.6) : 0
-        let splashing = cue.map { $0.isTitle || $0.recap != nil } ?? false
-        splashLevel = splashing ? min(1, splashLevel + dt / 0.35) : max(0, splashLevel - dt / 0.5)
-        input.splash = splashLevel
-        input.banner = bannerUntil > now && !splashing ? "ENCORE!" : nil
-        input.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        StageScene.render(input, into: canvas)
+        director.referenceWidth = canvas.width
+        director.advance(to: now)
+        StageScene.render(director.input(width: canvas.width, height: canvas.height), into: canvas)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         pixelLayer.contents = canvas.makeImage()
         pixelLayer.setAffineTransform(shakeTransform(now))
         CATransaction.commit()
 
-        let key = cue.map { "\($0.current)|\($0.start ?? -1)|\($0.isTitle)|\($0.recap != nil)" }
-        if key != lastCueKey {
-            lastCueKey = key
-            cueStartedAt = now
-        }
-        var hudState = StageHUDView.State()
-        hudState.palette = MoodPalette.of(pose.mood == .quiet ? .groove : pose.mood)
-        hudState.cue = cue
-        hudState.cueAge = now - cueStartedAt
-        hudState.elapsed = state.performance?.clock?.elapsed(at: now)
-        hudState.karaoke = state.karaoke
-        hudState.beatPeriod = state.beatPeriod
-        hudState.bpm = live ? state.bpm : nil
-        hudState.moodLabel = live ? state.mood.label : nil
-        hudState.hop = pose.active ? pose.hop : 0
-        if let performance = state.performance {
-            hudState.title = performance.title
-            hudState.subtitle = performance.artist
-            hudState.live = false
-        } else if state.playing {
-            hudState.title = state.radioTitle
-            hudState.subtitle = "Claude FM"
-            hudState.live = true
-        } else if state.pose.showsMotion {
-            hudState.title = "지금 나는 소리에 맞춰"
-            hudState.subtitle = state.mood.caption ?? ""
-        }
-        hudState.idle = !live
-        hudState.needsPermission = state.needsPermission && !hearing
-        if let performance = state.performance, let progress = performance.progress(at: now),
-           let position = performance.position, let duration = performance.duration {
-            hudState.songProgress = progress
-            hudState.songTime = "\(Self.clockText(min(position.elapsed(at: now), duration))) / \(Self.clockText(duration))"
-        }
+        var hudState = director.hud(for: .window)
         let sinceMouse = now - lastMouseMove
         hudState.hint = sinceMouse < 2.5 ? 1 : max(0, 1 - (sinceMouse - 2.5) / 0.6)
-        let sinceToast = now - toastShownAt
-        hudState.toastLevel = sinceToast < 1.8 ? min(1, (1.8 - sinceToast) / 0.3) : 0
-        hudState.toast = hudState.toastLevel > 0 ? toastText : ""
         hud.update(hudState)
+        updateBadge(hint: hudState.hint)
     }
 
-    /// 3:07 처럼 분과 초.
-    static func clockText(_ seconds: TimeInterval) -> String {
-        guard seconds.isFinite else { return "--:--" }
-        let total = max(0, Int(seconds.rounded(.down)))
-        return String(format: "%d:%02d", total / 60, total % 60)
+    /// 보내는 동안에는 단추가 늘 보이고, 아니면 안내 글처럼 마우스를 움직일 때만 나온다.
+    private func updateBadge(hint: Double) {
+        let alpha = CGFloat(castStatus.isActive ? max(0.8, hint) : hint)
+        let hidden = alpha < 0.02
+        if castBadge.isHidden != hidden { castBadge.isHidden = hidden }
+        if abs(castBadge.alphaValue - alpha) > 0.005 { castBadge.alphaValue = alpha }
+    }
+
+    private func openCastMenu() {
+        lastMouseMove = ProcessInfo.processInfo.systemUptime
+        layoutBadge()
+        updateBadge(hint: 1)
+        onCastMenu?(castBadge)
     }
 
     /// 폭죽이 터질 때 0.4초 동안 픽셀 한두 칸만큼 흔든다.
     private func shakeTransform(_ now: TimeInterval) -> CGAffineTransform {
-        let age = now - shakeStartedAt
-        guard age < 0.4, shakeStrength > 0 else { return .identity }
-        let fade = 1 - age / 0.4
-        let amount = Double(pixelScale) * 1.5 * shakeStrength * fade
-        let dx = sin(age * 90) * amount
-        let dy = cos(age * 71) * amount * 0.6
-        return CGAffineTransform(translationX: CGFloat(dx.rounded()), y: CGFloat(dy.rounded()))
+        let shake = director.shake(at: now)
+        guard shake.dx != 0 || shake.dy != 0 else { return .identity }
+        let scale = Double(pixelScale)
+        return CGAffineTransform(translationX: CGFloat((shake.dx * scale).rounded()), y: CGFloat((shake.dy * scale).rounded()))
     }
 
     /// 지금 무대를 화면 그대로(픽셀 무대와 글자) 이미지로 만든다.
@@ -445,7 +308,7 @@ final class StageView: NSView {
         let board = NSPasteboard.general
         board.clearContents()
         board.writeObjects([image])
-        toast("무대 사진을 복사했어요")
+        director.toast("무대 사진을 복사했어요", onTV: false)
     }
 
     // MARK: - 입력
@@ -473,14 +336,10 @@ final class StageView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         let frame = pixelLayer.frame
         guard frame.contains(point) else { return }
-        let x = Double((point.x - frame.minX) / CGFloat(pixelScale))
-        let y = Double((frame.maxY - point.y) / CGFloat(pixelScale))
-        let mood = snapshot().mood
-        let seed = Int(ProcessInfo.processInfo.systemUptime * 1000) % 100_000
-        bursts.append(StageBurst(burst: ConfettiBurst(originX: x, originY: y, scale: 0.55, count: 26, seed: seed,
-                                                      colors: MoodPalette.of(mood == .quiet ? .groove : mood).confetti,
-                                                      glyph: shownReaction, upward: true), age: 0))
-        cheer(for: 1.4)
+        // TV 판과 크기가 달라도 같은 자리에 터지도록 판에 대한 비율로 넘긴다.
+        let x = Double((point.x - frame.minX) / CGFloat(pixelScale)) / Double(canvas.width)
+        let y = Double((frame.maxY - point.y) / CGFloat(pixelScale)) / Double(canvas.height)
+        director.confetti(atX: x, y: y)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -503,7 +362,11 @@ final class StageView: NSView {
         case 3, 36: // f, return
             window?.toggleFullScreen(nil)
         case 49: // space
+            if !event.isARepeat { director.launch() }
+        case 35: // p
             onTogglePlayback?()
+        case 17: // t
+            if !event.isARepeat { openCastMenu() }
         case 123: // ←
             onNudgeSync?(-0.1)
         case 124: // →
@@ -516,7 +379,139 @@ final class StageView: NSView {
     }
 }
 
+/// 무대 창 오른쪽 위의 TV 단추. 누르면 같은 Wi-Fi 의 크롬캐스트 목록이 뜬다.
+@MainActor
+final class StageCastBadge: NSView {
+    enum Status: Equatable {
+        case idle
+        case connecting(String)
+        case casting(String)
+
+        var isActive: Bool { self != .idle }
+
+        var title: String {
+            switch self {
+            case .idle: return "TV"
+            case .connecting(let name): return "연결 중 · \(name)"
+            case .casting(let name): return "TV 로 보내는 중 · \(name)"
+            }
+        }
+    }
+
+    var status = Status.idle {
+        didSet {
+            guard status != oldValue else { return }
+            toolTip = status.isActive ? status.title : "무대를 TV 로 보내기 (T)"
+            needsDisplay = true
+        }
+    }
+
+    var unit: CGFloat = 1 {
+        didSet {
+            guard unit != oldValue else { return }
+            symbol = nil
+            needsDisplay = true
+        }
+    }
+
+    var onPress: (() -> Void)?
+    private var pressed = false
+    private var symbol: NSImage?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        toolTip = "무대를 TV 로 보내기 (T)"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    private var font: NSFont { NSFont.systemFont(ofSize: 12 * unit, weight: .bold) }
+    private var iconHeight: CGFloat { 11 * unit }
+
+    var preferredSize: NSSize {
+        let text = (status.title as NSString).size(withAttributes: [.font: font])
+        let icon = iconWidth
+        return NSSize(width: ceil(text.width + icon + 6 * unit + 12 * unit * 1.4),
+                      height: ceil(text.height + 12 * unit * 0.7))
+    }
+
+    private var iconWidth: CGFloat {
+        guard let symbol = tintedSymbol(), symbol.size.height > 0 else { return 0 }
+        return iconHeight * symbol.size.width / symbol.size.height
+    }
+
+    /// 흰색으로 칠한 TV 기호. 크기가 바뀔 때만 다시 만든다.
+    private func tintedSymbol() -> NSImage? {
+        if let symbol { return symbol }
+        guard let base = NSImage(systemSymbolName: "tv", accessibilityDescription: nil),
+              let sized = base.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12 * unit, weight: .bold)) else { return nil }
+        let size = sized.size
+        let tinted = NSImage(size: size, flipped: false) { rect in
+            sized.draw(in: rect)
+            NSColor.white.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+        symbol = tinted
+        return tinted
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let fill: NSColor
+        switch status {
+        case .idle:
+            fill = NSColor.black.withAlphaComponent(pressed ? 0.62 : 0.45)
+        case .connecting:
+            fill = NSColor.black.withAlphaComponent(pressed ? 0.72 : 0.56)
+        case .casting:
+            fill = NSColor(srgbRed: 0.85, green: 0.47, blue: 0.34, alpha: pressed ? 1 : 0.92)
+        }
+        fill.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2).fill()
+        var x = rect.minX + 12 * unit * 0.7
+        if let symbol = tintedSymbol() {
+            let width = iconWidth
+            symbol.draw(in: NSRect(x: x, y: rect.midY - iconHeight / 2, width: width, height: iconHeight),
+                        from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            x += width + 6 * unit
+        }
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+        let size = (status.title as NSString).size(withAttributes: attrs)
+        (status.title as NSString).draw(at: NSPoint(x: x, y: rect.midY - size.height / 2), withAttributes: attrs)
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        pressed = true
+        display()
+        // 목록은 누르는 즉시 뜨고, 닫힐 때까지 여기서 기다린다.
+        onPress?()
+        pressed = false
+        needsDisplay = true
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityLabel() -> String? { status.isActive ? status.title : "무대를 TV 로 보내기" }
+    override func accessibilityPerformPress() -> Bool {
+        onPress?()
+        return true
+    }
+}
+
 /// 무대 위 글자 층. 가사는 노래방처럼 채우고, 곡 정보·빠르기·안내를 얹는다.
+/// TV 에서는 가장자리가 조금 잘려도 글자가 남도록 `safeInset` 만큼 안쪽에 그린다.
 @MainActor
 final class StageHUDView: NSView {
     struct State: Equatable {
@@ -552,6 +547,10 @@ final class StageHUDView: NSView {
     }
 
     private(set) var state = State()
+    /// 글자를 이만큼 안쪽에 그린다. 아래 그늘은 뷰 전체에 깐다.
+    var safeInset = NSSize.zero {
+        didSet { needsDisplay = true }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -569,16 +568,28 @@ final class StageHUDView: NSView {
         }
     }
 
-    private var unit: CGFloat { max(0.6, min(1.6, bounds.height / 540)) }
+    /// 글자를 놓는 판. 안쪽 여백을 뺀 크기이고, 그릴 때는 여백만큼 옮겨 둔다.
+    private var box: NSRect {
+        NSRect(x: 0, y: 0, width: max(1, bounds.width - safeInset.width * 2), height: max(1, bounds.height - safeInset.height * 2))
+    }
+
+    private var unit: CGFloat { max(0.6, min(1.6, box.height / 540)) }
 
     override func draw(_ dirtyRect: NSRect) {
         drawBottomShade(dirtyRect)
+        NSGraphicsContext.saveGraphicsState()
+        if safeInset != .zero {
+            let shift = NSAffineTransform()
+            shift.translateX(by: safeInset.width, yBy: safeInset.height)
+            shift.concat()
+        }
         drawHeader()
         drawCenter()
         drawLyrics()
         drawProgress()
         drawHint()
         drawToast()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     // MARK: - 바탕
@@ -607,7 +618,7 @@ final class StageHUDView: NSView {
                 x += badge.width + 8 * unit
             }
             let attrs: [NSAttributedString.Key: Any] = [.font: titleFont, .foregroundColor: NSColor.white, .shadow: shadow]
-            let limit = bounds.width * 0.55
+            let limit = box.width * 0.55
             (state.title as NSString).draw(with: NSRect(x: x, y: y - 2 * unit, width: limit, height: titleFont.pointSize * 1.4),
                                            options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
             y += titleFont.pointSize * 1.3
@@ -620,7 +631,7 @@ final class StageHUDView: NSView {
             }
         }
         // 오른쪽 위: 빠르기와 분위기
-        var right = bounds.width - margin
+        var right = box.width - margin
         let chipFont = NSFont.monospacedDigitSystemFont(ofSize: 12 * unit, weight: .bold)
         let chipFill = NSColor.black.withAlphaComponent(0.42)
         if let mood = state.moodLabel {
@@ -658,7 +669,7 @@ final class StageHUDView: NSView {
     // MARK: - 가운데: 제목 카드, 곡 기록, 쉬는 무대 안내
 
     private func drawCenter() {
-        let centerY = bounds.height * 0.3
+        let centerY = box.height * 0.3
         if let cue = state.cue, cue.isTitle {
             let appear = min(1, state.cueAge / 0.5)
             let rise = (1 - appear) * 14 * unit
@@ -667,7 +678,7 @@ final class StageHUDView: NSView {
             drawCentered("♪ NOW PLAYING", y: centerY - 46 * unit + rise,
                          font: NSFont.systemFont(ofSize: 12 * unit, weight: .heavy),
                          color: state.palette.accent.nsColor(alpha: 0.9 * appear), kern: 3 * unit)
-            let maxWidth = bounds.width * 0.86
+            let maxWidth = box.width * 0.86
             drawCentered(fit(cue.current, font: titleFont, width: maxWidth), y: centerY - 22 * unit + rise, font: titleFont,
                          color: NSColor.white.withAlphaComponent(appear))
             if let artist = cue.next {
@@ -684,17 +695,17 @@ final class StageHUDView: NSView {
             let pixel = (4.5 * unit).rounded()
             let glyphW = CGFloat(glyph.width) * pixel, glyphH = CGFloat(glyph.height) * pixel
             let glyphY = centerY - glyphH / 2 - state.hop * 6 * unit
-            drawGlyph(glyph, x: (bounds.width - textWidth) / 2 - glyphW - 20 * unit, y: glyphY, pixel: pixel, alpha: appear)
-            drawGlyph(glyph, x: (bounds.width + textWidth) / 2 + 20 * unit, y: glyphY, pixel: pixel, alpha: appear)
+            drawGlyph(glyph, x: (box.width - textWidth) / 2 - glyphW - 20 * unit, y: glyphY, pixel: pixel, alpha: appear)
+            drawGlyph(glyph, x: (box.width + textWidth) / 2 + 20 * unit, y: glyphY, pixel: pixel, alpha: appear)
             drawCentered(recap.headline, y: centerY - font.pointSize * 0.62, font: font, color: NSColor.white.withAlphaComponent(appear))
             drawCentered(recap.caption, y: centerY + font.pointSize * 0.62, font: NSFont.systemFont(ofSize: 16 * unit, weight: .semibold),
                          color: NSColor.white.withAlphaComponent(0.7 * appear))
             return
         }
         if state.idle {
-            drawCentered("음악을 틀면 무대가 시작돼요", y: bounds.height * 0.83, font: NSFont.systemFont(ofSize: 20 * unit, weight: .bold),
+            drawCentered("음악을 틀면 무대가 시작돼요", y: box.height * 0.83, font: NSFont.systemFont(ofSize: 20 * unit, weight: .bold),
                          color: NSColor.white.withAlphaComponent(0.85))
-            drawCentered("Claude FM 을 재생하거나 다른 앱에서 노래를 틀어 보세요", y: bounds.height * 0.83 + 30 * unit,
+            drawCentered("Claude FM 을 재생하거나 다른 앱에서 노래를 틀어 보세요", y: box.height * 0.83 + 30 * unit,
                          font: NSFont.systemFont(ofSize: 13 * unit, weight: .medium), color: NSColor.white.withAlphaComponent(0.55))
         }
     }
@@ -703,11 +714,11 @@ final class StageHUDView: NSView {
 
     private func drawLyrics() {
         guard let cue = state.cue, !cue.isTitle, cue.recap == nil else { return }
-        let bottom = bounds.height - 34 * unit
+        let bottom = box.height - 34 * unit
         let lyricFont = NSFont.systemFont(ofSize: 40 * unit, weight: .heavy)
         let nextFont = NSFont.systemFont(ofSize: 21 * unit, weight: .semibold)
         let originalFont = NSFont.systemFont(ofSize: 14 * unit, weight: .medium)
-        let maxWidth = bounds.width * 0.86
+        let maxWidth = box.width * 0.86
 
         if cue.isHumming {
             // 가사를 모르는 곡은 제목을 작게 띄운다.
@@ -738,17 +749,26 @@ final class StageHUDView: NSView {
         let sungColor = hook ? NSColor(srgbRed: 1.0, green: 0.80, blue: 0.32, alpha: 1)
                              : NSColor(srgbRed: 1.0, green: 0.56, blue: 0.40, alpha: 1)
         let widths = lines.map { ($0 as NSString).size(withAttributes: [.font: font]).width }
-        let total = widths.reduce(0, +)
-        var remaining = (progress ?? 0) * Double(total)
+        // 채움은 글자 수로 센다. 줄마다 맡은 글자 몫을 그 줄의 폭으로 바꿔, 말풍선·팝오버와 같은 자리를 채운다.
+        let letters = lines.map { line in line.reduce(0) { $0 + ($1.isLetter || $1.isNumber ? 1 : 0) } }
+        let totalLetters = letters.reduce(0, +)
+        var lettersBefore = 0
         let shadow = textShadow(blur: 10 * unit)
         for (index, line) in lines.enumerated() {
             let width = widths[index]
-            let x = (bounds.width - width) / 2
+            let x = (box.width - width) / 2
             let y = top + CGFloat(index) * lineHeight
             let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: baseColor, .shadow: shadow]
             (line as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
-            let take = min(Double(width), max(0, remaining))
-            remaining -= Double(width)
+            var take = 0.0
+            if let progress, totalLetters > 0, letters[index] > 0 {
+                let target = progress * Double(totalLetters) - Double(lettersBefore)
+                let lineProgress = min(1, max(0, target / Double(letters[index])))
+                take = KaraokeText.sungWidth(line, progress: lineProgress) { prefix in
+                    Double((prefix as NSString).size(withAttributes: [.font: font]).width)
+                }
+            }
+            lettersBefore += letters[index]
             if progress != nil, take > 0 {
                 NSGraphicsContext.saveGraphicsState()
                 NSBezierPath(rect: NSRect(x: x - 2, y: y - 4 * unit, width: CGFloat(take) + 2, height: lineHeight + 8 * unit)).addClip()
@@ -787,7 +807,7 @@ final class StageHUDView: NSView {
         let radius = 7 * unit
         let spacing = 30 * unit
         for index in 0..<total where index >= total - dots {
-            let x = bounds.width / 2 + (CGFloat(index) - CGFloat(total - 1) / 2) * spacing
+            let x = box.width / 2 + (CGFloat(index) - CGFloat(total - 1) / 2) * spacing
             let rect = NSRect(x: x - radius, y: centerY - radius, width: radius * 2, height: radius * 2)
             state.palette.accent.nsColor(alpha: 0.95).setFill()
             NSBezierPath(ovalIn: rect).fill()
@@ -798,17 +818,17 @@ final class StageHUDView: NSView {
     private func drawProgress() {
         guard let progress = state.songProgress else { return }
         let height = max(2, 3 * unit)
-        let track = NSRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
+        let track = NSRect(x: 0, y: box.height - height, width: box.width, height: height)
         NSColor.white.withAlphaComponent(0.12).setFill()
         track.fill()
         state.palette.primary.nsColor(alpha: 0.9).setFill()
-        NSRect(x: 0, y: track.minY, width: bounds.width * CGFloat(progress), height: height).fill()
+        NSRect(x: 0, y: track.minY, width: box.width * CGFloat(progress), height: height).fill()
         guard state.hint > 0.01, !state.songTime.isEmpty else { return }
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11 * unit, weight: .medium),
             .foregroundColor: NSColor.white.withAlphaComponent(0.6 * state.hint),
         ]
-        (state.songTime as NSString).draw(at: NSPoint(x: 18 * unit, y: bounds.height - height - 22 * unit), withAttributes: attrs)
+        (state.songTime as NSString).draw(at: NSPoint(x: 18 * unit, y: box.height - height - 22 * unit), withAttributes: attrs)
     }
 
     // MARK: - 안내
@@ -816,10 +836,10 @@ final class StageHUDView: NSView {
     private func drawHint() {
         guard state.hint > 0.01 else { return }
         let font = NSFont.systemFont(ofSize: 11 * unit, weight: .medium)
-        let text = "클릭 폭죽  ·  더블클릭 전체 화면  ·  ← → 가사 싱크  ·  ⌘C 무대 사진  ·  esc 닫기"
+        let text = "클릭·스페이스 폭죽  ·  더블클릭 전체 화면  ·  ← → 가사 싱크  ·  P 재생  ·  T TV 로 보내기  ·  ⌘C 무대 사진  ·  esc 닫기"
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white.withAlphaComponent(0.6 * state.hint)]
         let size = (text as NSString).size(withAttributes: attrs)
-        (text as NSString).draw(at: NSPoint(x: bounds.width - size.width - 18 * unit, y: bounds.height - size.height - 10 * unit),
+        (text as NSString).draw(at: NSPoint(x: box.width - size.width - 18 * unit, y: box.height - size.height - 10 * unit),
                                 withAttributes: attrs)
     }
 
@@ -828,14 +848,14 @@ final class StageHUDView: NSView {
             let text = "시스템 오디오 녹음을 허용하면 무대가 음악에 맞춰 춤춰요"
             let font = NSFont.systemFont(ofSize: 12 * unit, weight: .semibold)
             let size = pillSize(text, font: font)
-            drawPill(text, at: NSPoint(x: (bounds.width - size.width) / 2, y: 24 * unit), font: font,
+            drawPill(text, at: NSPoint(x: (box.width - size.width) / 2, y: 24 * unit), font: font,
                      fill: NSColor.black.withAlphaComponent(0.5), text: NSColor.white.withAlphaComponent(0.85))
             return
         }
         guard state.toastLevel > 0.01, !state.toast.isEmpty else { return }
         let font = NSFont.systemFont(ofSize: 13 * unit, weight: .bold)
         let size = pillSize(state.toast, font: font)
-        drawPill(state.toast, at: NSPoint(x: (bounds.width - size.width) / 2, y: 24 * unit), font: font,
+        drawPill(state.toast, at: NSPoint(x: (box.width - size.width) / 2, y: 24 * unit), font: font,
                  fill: NSColor.black.withAlphaComponent(0.55 * state.toastLevel),
                  text: NSColor.white.withAlphaComponent(state.toastLevel))
     }
@@ -854,7 +874,7 @@ final class StageHUDView: NSView {
         var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color, .shadow: textShadow(blur: 8 * unit)]
         if kern != 0 { attrs[.kern] = kern }
         let size = (text as NSString).size(withAttributes: attrs)
-        (text as NSString).draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: y), withAttributes: attrs)
+        (text as NSString).draw(at: NSPoint(x: (box.width - size.width) / 2, y: y), withAttributes: attrs)
     }
 
     private func drawGlyph(_ glyph: PixelGlyph, x: CGFloat, y: CGFloat, pixel: CGFloat, alpha: CGFloat) {
