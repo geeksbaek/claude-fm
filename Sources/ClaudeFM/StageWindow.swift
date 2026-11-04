@@ -200,14 +200,16 @@ final class StageView: NSView {
         let w = Double(canvas.width), h = Double(canvas.height)
         let colors = MoodPalette.of(snapshot().mood == .quiet ? .groove : snapshot().mood).confetti
         let seed = Int(ProcessInfo.processInfo.systemUptime * 1000) % 100_000
-        let count = max(30, canvas.width / 6)
+        // '동작 줄이기'를 켰으면 폭죽을 줄이고 흔들지 않는다.
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let count = max(30, canvas.width / 6) / (reduceMotion ? 3 : 1)
         bursts.append(StageBurst(burst: ConfettiBurst(originX: w * 0.08, originY: h * 0.98, scale: 0.9, count: count, seed: seed,
                                                       colors: colors, glyph: reaction, upward: true), age: 0))
         bursts.append(StageBurst(burst: ConfettiBurst(originX: w * 0.92, originY: h * 0.98, scale: 0.9, count: count, seed: seed + 77,
                                                       colors: colors, glyph: reaction, upward: true), age: 0))
         bursts.append(StageBurst(burst: ConfettiBurst(originX: w * 0.5, originY: -4, scale: 0.6, count: count, seed: seed + 151,
                                                       colors: colors, glyph: reaction, upward: false), age: -0.25))
-        shake(1)
+        if !reduceMotion { shake(1) }
         cheer(for: 2.4)
     }
 
@@ -257,6 +259,8 @@ final class StageView: NSView {
 
     private func tick() {
         let now = ProcessInfo.processInfo.systemUptime
+        // 저전력 모드에서는 초당 30번만 그린다.
+        if ProcessInfo.processInfo.isLowPowerModeEnabled, now - lastTick < 1.0 / 40 { return }
         let dt = min(0.1, max(0, now - lastTick))
         lastTick = now
         let state = snapshot()
@@ -318,6 +322,7 @@ final class StageView: NSView {
         let splashing = cue.map { $0.isTitle || $0.recap != nil } ?? false
         splashLevel = splashing ? min(1, splashLevel + dt / 0.35) : max(0, splashLevel - dt / 0.5)
         input.splash = splashLevel
+        input.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         StageScene.render(input, into: canvas)
         CATransaction.begin()
         CATransaction.setDisableActions(true)

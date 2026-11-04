@@ -29,6 +29,8 @@ struct StageInput {
     var cheer = 0.0
     /// 전광판 위에 제목·곡 기록 글자가 뜨는 중(0...1). 전광판을 어둡게 눌러 글자가 읽히게 한다.
     var splash = 0.0
+    /// 시스템 설정의 '동작 줄이기'. 전광판이 번쩍이지 않는다.
+    var reduceMotion = false
 }
 
 /// 무대에서 터진 폭죽과 그 나이.
@@ -352,7 +354,7 @@ enum StageScene {
         let offsetX = x + (w - columns * pitch + 1) / 2
         let offsetY = y + (h - rows * pitch + 1) / 2
         let levels = input.spectrum.count == SpectrumMeter.bandCount ? input.spectrum : Array(repeating: 0, count: SpectrumMeter.bandCount)
-        let strobe = input.live ? input.hookLevel * hop * 0.25 : 0
+        let strobe = input.live && !input.reduceMotion ? input.hookLevel * hop * 0.25 : 0
         // 반응 그림을 전광판 가운데 크게 띄운다.
         let glyph = input.reaction.map(PixelGlyph.large)
         let glyphW = glyph?.width ?? 9, glyphH = glyph?.height ?? 9

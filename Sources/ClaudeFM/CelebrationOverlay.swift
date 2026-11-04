@@ -35,6 +35,8 @@ final class CelebrationOverlay {
     /// 아이콘 바로 아래에서 터뜨린다. 쉬는 시간 안이면 건너뛴다.
     func burst(at anchor: NSRect, screen: NSScreen, mood: MusicMood, reaction: LyricReaction?, force: Bool = false) {
         let now = ProcessInfo.processInfo.systemUptime
+        // '동작 줄이기'를 켰으면 메뉴바 아래로 쏟아지는 폭죽은 쉰다.
+        guard force || !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         guard force || now - lastBurst >= Self.cooldown else { return }
         lastBurst = now
         var frame = NSRect(
