@@ -15,6 +15,7 @@ extension HangulReading {
         }
         var cursor = 0
         var spoken: [String] = []
+        var spokenRaw: [String] = []
         for token in mandarinTokens(text) {
             guard let parts = pinyinLetters(token) else {
                 cursor += token.filter(isHan).count
@@ -44,9 +45,19 @@ extension HangulReading {
                let fixed = mandarinPolyphone(chars, at: cursor, syllables[0]) {
                 syllables = [fixed]
             }
+            let raw = String(chars[min(cursor, chars.count)..<min(cursor + cuts.count, chars.count)])
             cursor += cuts.count
             let reading = renderPinyinSyllables(syllables)
-            if !reading.isEmpty { spoken.append(reading) }
+            guard !reading.isEmpty else { continue }
+            // 一九九九年·二零零八年 처럼 글자마다 끊긴 숫자와 그 뒤 단위는 한 낱말로 잇는다.
+            if let last = spokenRaw.last, isChineseNumeral(last),
+               isChineseNumeral(raw) || (raw.count == 1 && chineseNumberUnits.contains(raw)) {
+                spoken[spoken.count - 1] += reading
+                spokenRaw[spokenRaw.count - 1] += raw
+            } else {
+                spoken.append(reading)
+                spokenRaw.append(raw)
+            }
         }
         if spoken.isEmpty { return orJapanese ? japanese(text) : text }
         return spoken.joined(separator: " ")
@@ -96,18 +107,27 @@ extension HangulReading {
         "0": "零", "1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六", "7": "七", "8": "八", "9": "九",
     ]
 
+    /// 숫자만으로 된 말(第 로 시작해도 된다).
+    static func isChineseNumeral(_ raw: String) -> Bool {
+        let body = raw.hasPrefix("第") ? raw.dropFirst() : Substring(raw)
+        return !body.isEmpty && body.allSatisfy { "零〇一二三四五六七八九十百千万亿两萬億兩".contains($0) }
+    }
+
+    static let chineseNumberUnits: Set<String> = ["年", "月", "日", "号", "號", "点", "點", "岁", "歲"]
+
     static func chineseDigits(_ digits: String) -> String {
         digits.map { chineseDigitNames[$0] ?? String($0) }.joined()
     }
 
-    /// 중국어 가사의 숫자를 한자 숫자로 푼다. 年 앞의 네 자리와 0 으로 시작하는 숫자는 한 자씩(一九九九年),
-    /// 나머지는 자리를 붙여(二十四, 一百, 两千零二十) 읽고, 양사 앞의 2 는 两 이다.
-    static func chineseNumberWord(_ digits: String, before next: Character?) -> String {
-        if (digits.count > 1 && digits.first == "0") || (next == "年" && digits.count == 4) || digits.count > 12 {
+    /// 중국어 가사의 숫자를 한자 숫자로 푼다. 年 앞의 네 자리 해와 0 으로 시작하는 숫자는 한 자씩(一九九九年),
+    /// 나머지는 자리를 붙여(二十四, 一千年, 两千零二十) 읽고, 第 가 없는 양사 앞의 2 는 两 이다.
+    static func chineseNumberWord(_ digits: String, before next: Character?, after previous: Character? = nil) -> String {
+        let year = next == "年" && digits.count == 4 && (Int(digits) ?? 0) % 1000 != 0
+        if (digits.count > 1 && digits.first == "0") || year || digits.count > 12 {
             return chineseDigits(digits)
         }
         guard let value = Int(digits) else { return chineseDigits(digits) }
-        if value == 2, let next, "个個次天只位本张張件条條种種首点點岁歲年辆輛双雙对對杯颗顆片句步遍回场場".contains(next) {
+        if value == 2, previous != "第", let next, "个個次天只位本张張件条條种種首点點岁歲年辆輛双雙对對杯颗顆片句步遍回场場".contains(next) {
             return "两"
         }
         return chineseNumeral(value)

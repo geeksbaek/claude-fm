@@ -277,7 +277,7 @@ enum HangulReading {
                     out += "百分之" + chineseNumberWord(digits, before: nil)
                     index += 1
                 } else {
-                    out += chineseNumberWord(digits, before: index < chars.count ? chars[index] : nil)
+                    out += chineseNumberWord(digits, before: index < chars.count ? chars[index] : nil, after: prevImmediate)
                 }
             } else if useJapanese {
                 var ja = japaneseNumberWord(digits)

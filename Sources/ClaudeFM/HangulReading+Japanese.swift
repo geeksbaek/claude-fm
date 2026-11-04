@@ -107,6 +107,9 @@ extension HangulReading {
         "今朝": "kesa", "今宵": "koyoi", "一昨日": "ototoi", "明後日": "asatte", "眼鏡": "megane", "浴衣": "yukata",
         "一人一人": "hitorihitori", "一人ひとり": "hitorihitori", "一日中": "ichinichijuu", "世界中": "sekaijuu",
         "日本中": "nihonjuu", "一晩中": "hitobanjuu", "一年中": "ichinenjuu", "体中": "karadajuu",
+        "誕生日": "tanjoubi", "日本一": "nihon'ichi", "世界一": "sekaiichi", "一期一会": "ichigoichie",
+        "春夏秋冬": "shunkashuutou", "喜怒哀楽": "kidoairaku", "花鳥風月": "kachoufuugetsu", "蜃気楼": "shinkirou",
+        "金木犀": "kinmokusei", "千本桜": "senbonzakura",
         "月曜日": "getsuyoubi", "火曜日": "kayoubi", "水曜日": "suiyoubi", "木曜日": "mokuyoubi",
         "金曜日": "kin'youbi", "土曜日": "doyoubi", "日曜日": "nichiyoubi",
     ]
@@ -165,12 +168,23 @@ extension HangulReading {
         let word = words[index]
         let previous = words[index - 1]
         if japanesePrefixes.contains(previous.raw) { return true }
+        if word.raw == "お" || word.raw == "ご" { return false }
         if word.number { return false }
         if previous.number, japaneseNumberSuffixes.contains(word.raw) { return true }
         if japaneseSuffixes.contains(word.raw) { return true }
         if word.raw == "中", word.latin == "juu" || word.latin == "chuu" { return true }
         if word.raw == "君", word.latin == "kun" { return true }
+        // バイバイ 처럼 되풀이한 가타카나
+        if word.raw == previous.raw, word.raw.allSatisfy({ isKana($0) && !isHiragana($0) }) { return true }
         guard word.raw.allSatisfy(isKana) else {
+            // 地平線·放課後 처럼 한자어 뒤에 따로 떨어진 한 글자 한자는 앞말에 붙인다(뒤에 어미가 오면 동사라 띄운다).
+            if word.raw.count == 1, !previous.number, !previous.raw.isEmpty,
+               previous.raw.allSatisfy({ isHan($0) || (isKana($0) && !isHiragana($0)) }) {
+                let next = index + 1 < words.count ? words[index + 1].raw : nil
+                if next == nil || next!.contains(where: isHan) || ["の", "が", "を", "に", "は", "へ", "と", "も", "で", "や"].contains(next!) {
+                    return true
+                }
+            }
             // 走り出す·探し続ける 처럼 동사 연용형 뒤의 뒷동사
             return isJapaneseVerbStem(previous) && japaneseCompoundTails.contains { word.raw.hasPrefix($0) }
         }
@@ -181,7 +195,12 @@ extension HangulReading {
         if core.hasPrefix("ちゃ") || core.hasPrefix("じゃ") { return true }
         if previous.raw == "て" || previous.raw == "で", japaneseTeAuxiliaries.contains(core) { return true }
         if core == "そう", isJapaneseVerbStem(previous) { return true }
-        return word.raw.count == 1
+        return word.raw.count == 1 || ["て", "で", "た", "だ"].contains(core)
+    }
+
+    static func isHiragana(_ char: Character) -> Bool {
+        guard let value = scalarValue(char) else { return false }
+        return (0x3040...0x309F).contains(value)
     }
 
     /// 조사·어미·조동사처럼 언제나 앞말에 붙는 가나 조각. 끝의 っ 는 떼고 견준다.
@@ -194,7 +213,7 @@ extension HangulReading {
         "れる", "られる", "せる", "させる", "られ", "させ", "ます", "まし", "ませ", "ましょ", "ましょう",
         "です", "でし", "でしょ", "でしょう", "だろ", "だろう", "だ", "よう", "まい", "らしい", "みたい", "っぱなし",
         "ない", "なく", "なか", "なけれ", "なきゃ", "なくちゃ", "なくて", "なさい",
-        "すぎ", "すぎる", "すぎた", "すぎて", "しれ", "がる", "がっ", "げ",
+        "すぎ", "すぎる", "すぎた", "すぎて", "しれ", "がる", "がっ", "げ", "きり", "っきり",
     ]
 
     /// 동사 て·で 꼴 뒤에서만 붙는 보조 용언.
@@ -202,7 +221,7 @@ extension HangulReading {
         "いる", "い", "いた", "いて", "います", "いま", "いく", "いき", "いけ", "いこ",
         "くる", "き", "きた", "きて", "こ", "くれ", "くれる", "くれた", "くれて", "あげ", "あげる", "あげた",
         "もらう", "もら", "もらい", "おく", "おい", "おこ", "おか", "しまう", "しま", "しまい", "しまえ", "しまお",
-        "みる", "み", "みた", "みて", "みよ", "みせ",
+        "みる", "み", "みた", "みて", "みよ", "みせ", "みよう", "いこう", "おこう", "しまおう", "あげよう", "もらおう",
     ]
 
     /// 격조사 바로 뒤에서는 새 낱말을 여는 동사·형용사 머리. (に いて, を して, が ない)
@@ -228,7 +247,7 @@ extension HangulReading {
     ]
 
     /// 숫자 낱말 뒤에 붙는 말 (十年後, 三日前, 二度目).
-    static let japaneseNumberSuffixes: Set<String> = ["後", "前", "間", "目", "中", "頃", "ごろ", "ぶり", "以上", "以下", "越し"]
+    static let japaneseNumberSuffixes: Set<String> = ["後", "前", "間", "目", "中", "頃", "ごろ", "ぶり", "以上", "以下", "越し", "パーセント"]
 
     /// 동사 연용형 뒤에 붙어 한 동사가 되는 뒷동사.
     static let japaneseCompoundTails: [String] = [
@@ -302,11 +321,23 @@ extension HangulReading {
         "度": ("do", .plain), "度目": ("dome", .plain), "年": ("nen", .plain), "年間": ("nenkan", .plain), "年目": ("nenme", .plain),
         "時": ("ji", .plain), "時間": ("jikan", .plain), "月": ("gatsu", .plain), "秒": ("byou", .plain), "秒間": ("byoukan", .plain),
         "枚": ("mai", .plain), "番": ("ban", .plain), "番目": ("banme", .plain), "円": ("en", .plain), "倍": ("bai", .plain),
-        "位": ("i", .plain), "号": ("gou", .plain), "点": ("ten", .plain), "通り": ("toori", .plain),
+        "位": ("i", .plain), "号": ("gou", .plain), "点": ("ten", .plain), "通り": ("toori", .plain), "章": ("shou", .plain),
     ]
 
     /// 숫자(한자 숫자 낱말이나 何)와 뒤따르는 조수사를 한 낱말로 묶어 읽는다.
-    static func mergeJapaneseNumbers(_ words: [JapaneseWord]) -> [JapaneseWord] {
+    static func mergeJapaneseNumbers(_ source: [JapaneseWord]) -> [JapaneseWord] {
+        // 三本(mimoto)처럼 숫자와 조수사가 한 낱말로 나와 다르게 읽히면 나눠서 다시 읽는다. 十分(juubun, 충분히)은 둔다.
+        var words: [JapaneseWord] = []
+        for word in source {
+            let digits = word.raw.prefix { japaneseNumeralDigits[$0] != nil || japaneseNumeralUnits[$0] != nil || japaneseNumeralGroups[$0] != nil }
+            let rest = String(word.raw.dropFirst(digits.count))
+            if !digits.isEmpty, japaneseCounters[rest] != nil, word.latin != "juubun" {
+                words.append(JapaneseWord(raw: String(digits), latin: ""))
+                words.append(JapaneseWord(raw: rest, latin: ""))
+            } else {
+                words.append(word)
+            }
+        }
         var out: [JapaneseWord] = []
         var index = 0
         var afterMonth = false
