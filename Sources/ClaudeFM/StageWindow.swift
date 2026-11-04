@@ -145,6 +145,9 @@ final class StageView: NSView {
     private var splashLevel = 0.0
     private var bannerUntil: TimeInterval = -10
     private var trackingArea: NSTrackingArea?
+    private var launchIndex = 0
+    private var beatCombo = 0
+    private var lastLaunch: TimeInterval = -10
     var onTogglePlayback: (() -> Void)?
     var onNudgeSync: ((Double) -> Void)?
 
@@ -222,6 +225,37 @@ final class StageView: NSView {
                                                       colors: colors, glyph: reaction, upward: false), age: -0.25))
         if !reduceMotion { shake(1) }
         cheer(for: 2.4)
+    }
+
+    /// 스페이스로 무대 앞에서 폭죽을 쏜다. 왼쪽 오른쪽을 번갈아 안쪽으로 옮겨 가며 쏘고,
+    /// 박에 맞춰 누르면 금빛으로 더 크게 터지고 관객이 더 크게 환호한다.
+    private func launch() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let state = snapshot()
+        let w = Double(canvas.width), h = Double(canvas.height)
+        let slots = [0.14, 0.86, 0.3, 0.7, 0.44, 0.56]
+        let slot = slots[launchIndex % slots.count]
+        launchIndex += 1
+        // 박을 잡고 있을 때만 박자를 본다. 박 앞뒤로 한 박의 14% 안이면 맞춘 것으로 친다.
+        var onBeat = false
+        if state.bpm != nil, let period = state.beatPeriod, period > 0 {
+            onBeat = state.beatPhase < 0.14 || state.beatPhase > 0.86
+        }
+        beatCombo = onBeat ? (now - lastLaunch < 2.5 ? beatCombo + 1 : 1) : 0
+        lastLaunch = now
+        let palette = MoodPalette.of(state.mood == .quiet ? .groove : state.mood).confetti
+        let colors = onBeat ? [RGBColor(0xFFD54A), RGBColor(0xFFF1B8), .white] + palette : palette
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let count = (onBeat ? 36 : 22) / (reduceMotion ? 2 : 1)
+        let seed = Int(now * 1000) % 100_000
+        bursts.append(StageBurst(burst: ConfettiBurst(originX: w * slot, originY: h * 0.97, scale: onBeat ? 0.85 : 0.6,
+                                                      count: count, seed: seed, colors: colors,
+                                                      glyph: shownReaction ?? (onBeat ? .star : nil), upward: true), age: 0))
+        // 마구 눌러도 무대가 폭죽으로 덮이지 않게 가장 오래된 것부터 거둔다.
+        if bursts.count > 24 { bursts.removeFirst(bursts.count - 24) }
+        cheer(for: onBeat ? 1.6 : 0.9)
+        if onBeat, beatCombo >= 4, !reduceMotion { shake(0.45) }
+        if [4, 8, 16, 32, 64].contains(beatCombo) { toast("박자 딱! ×\(beatCombo)") }
     }
 
     func flashSync(_ offset: Double) {
@@ -503,6 +537,8 @@ final class StageView: NSView {
         case 3, 36: // f, return
             window?.toggleFullScreen(nil)
         case 49: // space
+            if !event.isARepeat { launch() }
+        case 35: // p
             onTogglePlayback?()
         case 123: // ←
             onNudgeSync?(-0.1)
@@ -816,7 +852,7 @@ final class StageHUDView: NSView {
     private func drawHint() {
         guard state.hint > 0.01 else { return }
         let font = NSFont.systemFont(ofSize: 11 * unit, weight: .medium)
-        let text = "클릭 폭죽  ·  더블클릭 전체 화면  ·  ← → 가사 싱크  ·  ⌘C 무대 사진  ·  esc 닫기"
+        let text = "클릭·스페이스 폭죽  ·  더블클릭 전체 화면  ·  ← → 가사 싱크  ·  P 재생  ·  ⌘C 무대 사진  ·  esc 닫기"
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white.withAlphaComponent(0.6 * state.hint)]
         let size = (text as NSString).size(withAttributes: attrs)
         (text as NSString).draw(at: NSPoint(x: bounds.width - size.width - 18 * unit, y: bounds.height - size.height - 10 * unit),
