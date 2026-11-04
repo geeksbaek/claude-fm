@@ -129,8 +129,11 @@ final class StageView: NSView {
     private var lastCueKey: String?
     private var cueStartedAt: TimeInterval = 0
     private var lastMouseMove: TimeInterval = -10
-    private var syncShownAt: TimeInterval = -10
-    private var syncValue = 0.0
+    private var toastText = ""
+    private var toastShownAt: TimeInterval = -10
+    private var cheerUntil: TimeInterval = -10
+    private var shakeStartedAt: TimeInterval = -10
+    private var shakeStrength = 0.0
     private var trackingArea: NSTrackingArea?
     var onTogglePlayback: (() -> Void)?
     var onNudgeSync: ((Double) -> Void)?
@@ -203,11 +206,28 @@ final class StageView: NSView {
                                                       colors: colors, glyph: reaction, upward: true), age: 0))
         bursts.append(StageBurst(burst: ConfettiBurst(originX: w * 0.5, originY: -4, scale: 0.6, count: count, seed: seed + 151,
                                                       colors: colors, glyph: reaction, upward: false), age: -0.25))
+        shake(1)
+        cheer(for: 2.4)
     }
 
     func flashSync(_ offset: Double) {
-        syncValue = offset
-        syncShownAt = ProcessInfo.processInfo.systemUptime
+        let text = abs(offset) < 0.05 ? "가사 싱크 맞춤" : String(format: "가사 %@ %.1f초", offset > 0 ? "늦게" : "빠르게", abs(offset))
+        toast(text)
+    }
+
+    private func toast(_ text: String) {
+        toastText = text
+        toastShownAt = ProcessInfo.processInfo.systemUptime
+    }
+
+    /// 무대가 쿵 하고 짧게 흔들린다.
+    private func shake(_ strength: Double) {
+        shakeStartedAt = ProcessInfo.processInfo.systemUptime
+        shakeStrength = strength
+    }
+
+    private func cheer(for seconds: TimeInterval) {
+        cheerUntil = max(cheerUntil, ProcessInfo.processInfo.systemUptime + seconds)
     }
 
     override func layout() {
@@ -293,8 +313,13 @@ final class StageView: NSView {
         input.bursts = bursts
         input.hour = Calendar.current.component(.hour, from: Date())
         input.live = live
+        input.cheer = cheerUntil > now ? min(1, (cheerUntil - now) / 0.6) : 0
         StageScene.render(input, into: canvas)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         pixelLayer.contents = canvas.makeImage()
+        pixelLayer.setAffineTransform(shakeTransform(now))
+        CATransaction.commit()
 
         let key = cue.map { "\($0.current)|\($0.start ?? -1)|\($0.isTitle)|\($0.recap != nil)" }
         if key != lastCueKey {
@@ -327,10 +352,61 @@ final class StageView: NSView {
         hudState.needsPermission = state.needsPermission && !hearing
         let sinceMouse = now - lastMouseMove
         hudState.hint = sinceMouse < 2.5 ? 1 : max(0, 1 - (sinceMouse - 2.5) / 0.6)
-        let sinceSync = now - syncShownAt
-        hudState.syncBadge = sinceSync < 1.6 ? min(1, (1.6 - sinceSync) / 0.3) : 0
-        hudState.syncOffset = syncValue
+        let sinceToast = now - toastShownAt
+        hudState.toastLevel = sinceToast < 1.8 ? min(1, (1.8 - sinceToast) / 0.3) : 0
+        hudState.toast = hudState.toastLevel > 0 ? toastText : ""
         hud.update(hudState)
+    }
+
+    /// 폭죽이 터질 때 0.4초 동안 픽셀 한두 칸만큼 흔든다.
+    private func shakeTransform(_ now: TimeInterval) -> CGAffineTransform {
+        let age = now - shakeStartedAt
+        guard age < 0.4, shakeStrength > 0 else { return .identity }
+        let fade = 1 - age / 0.4
+        let amount = Double(pixelScale) * 1.5 * shakeStrength * fade
+        let dx = sin(age * 90) * amount
+        let dy = cos(age * 71) * amount * 0.6
+        return CGAffineTransform(translationX: CGFloat(dx.rounded()), y: CGFloat(dy.rounded()))
+    }
+
+    /// 지금 무대를 화면 그대로(픽셀 무대와 글자) 이미지로 만든다.
+    private func snapshotImage() -> NSImage? {
+        guard let pixels = canvas.makeImage() else { return nil }
+        let size = bounds.size
+        let scale = window?.backingScaleFactor ?? 2
+        guard size.width > 0, size.height > 0,
+              let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        let cg = context.cgContext
+        cg.scaleBy(x: scale, y: scale)
+        cg.setFillColor(NSColor.black.cgColor)
+        cg.fill(CGRect(origin: .zero, size: size))
+        cg.interpolationQuality = .none
+        cg.draw(pixels, in: pixelLayer.frame)
+        cg.translateBy(x: 0, y: size.height)
+        cg.scaleBy(x: 1, y: -1)
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: true)
+        let appearance = NSAppearance(named: .darkAqua) ?? effectiveAppearance
+        appearance.performAsCurrentDrawingAppearance {
+            hud.draw(hud.bounds)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        rep.size = size
+        let image = NSImage(size: size)
+        image.addRepresentation(rep)
+        return image
+    }
+
+    private func copySnapshot() {
+        guard let image = snapshotImage() else { return }
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.writeObjects([image])
+        toast("무대 사진을 복사했어요")
     }
 
     // MARK: - 입력
@@ -348,11 +424,32 @@ final class StageView: NSView {
         lastMouseMove = ProcessInfo.processInfo.systemUptime
     }
 
+    /// 무대를 누르면 그 자리에서 폭죽이 솟고 관객이 환호한다. 두 번 누르면 전체 화면.
     override func mouseDown(with event: NSEvent) {
         lastMouseMove = ProcessInfo.processInfo.systemUptime
         if event.clickCount == 2 {
             window?.toggleFullScreen(nil)
+            return
         }
+        let point = convert(event.locationInWindow, from: nil)
+        let frame = pixelLayer.frame
+        guard frame.contains(point) else { return }
+        let x = Double((point.x - frame.minX) / CGFloat(pixelScale))
+        let y = Double((frame.maxY - point.y) / CGFloat(pixelScale))
+        let mood = snapshot().mood
+        let seed = Int(ProcessInfo.processInfo.systemUptime * 1000) % 100_000
+        bursts.append(StageBurst(burst: ConfettiBurst(originX: x, originY: y, scale: 0.55, count: 26, seed: seed,
+                                                      colors: MoodPalette.of(mood == .quiet ? .groove : mood).confetti,
+                                                      glyph: shownReaction, upward: true), age: 0))
+        cheer(for: 1.4)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "c" {
+            copySnapshot()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -396,8 +493,9 @@ final class StageHUDView: NSView {
         var beatPeriod: Double?
         var idle = true
         var hint = 0.0
-        var syncBadge = 0.0
-        var syncOffset = 0.0
+        /// 잠깐 떴다 사라지는 알림(가사 싱크, 사진 복사).
+        var toast = ""
+        var toastLevel = 0.0
         var palette = MoodPalette.of(.groove)
         var hop = 0.0
         var needsPermission = false
@@ -405,7 +503,7 @@ final class StageHUDView: NSView {
         /// 프레임마다 바뀌는 값을 뺀 나머지가 같으면 위쪽 글자는 다시 그리지 않는다.
         func sameHeader(as other: State) -> Bool {
             title == other.title && subtitle == other.subtitle && live == other.live && bpm == other.bpm
-                && moodLabel == other.moodLabel && syncBadge == other.syncBadge && syncOffset == other.syncOffset
+                && moodLabel == other.moodLabel && toast == other.toast && toastLevel == other.toastLevel
                 && needsPermission == other.needsPermission
         }
     }
@@ -436,7 +534,7 @@ final class StageHUDView: NSView {
         drawCenter()
         drawLyrics()
         drawHint()
-        drawSyncBadge()
+        drawToast()
     }
 
     // MARK: - 바탕
@@ -655,15 +753,15 @@ final class StageHUDView: NSView {
     private func drawHint() {
         guard state.hint > 0.01 else { return }
         let font = NSFont.systemFont(ofSize: 11 * unit, weight: .medium)
-        let text = "더블클릭 전체 화면  ·  ← → 가사 싱크  ·  스페이스 Claude FM  ·  esc 닫기"
+        let text = "클릭 폭죽  ·  더블클릭 전체 화면  ·  ← → 가사 싱크  ·  ⌘C 무대 사진  ·  esc 닫기"
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white.withAlphaComponent(0.6 * state.hint)]
         let size = (text as NSString).size(withAttributes: attrs)
         (text as NSString).draw(at: NSPoint(x: bounds.width - size.width - 18 * unit, y: bounds.height - size.height - 10 * unit),
                                 withAttributes: attrs)
     }
 
-    private func drawSyncBadge() {
-        if state.needsPermission, state.syncBadge <= 0.01 {
+    private func drawToast() {
+        if state.needsPermission, state.toastLevel <= 0.01 {
             let text = "시스템 오디오 녹음을 허용하면 무대가 음악에 맞춰 춤춰요"
             let font = NSFont.systemFont(ofSize: 12 * unit, weight: .semibold)
             let size = pillSize(text, font: font)
@@ -671,14 +769,12 @@ final class StageHUDView: NSView {
                      fill: NSColor.black.withAlphaComponent(0.5), text: NSColor.white.withAlphaComponent(0.85))
             return
         }
-        guard state.syncBadge > 0.01 else { return }
-        let value = state.syncOffset
-        let text = value == 0 ? "가사 싱크 맞춤" : String(format: "가사 %@ %.1f초", value > 0 ? "늦게" : "빠르게", abs(value))
+        guard state.toastLevel > 0.01, !state.toast.isEmpty else { return }
         let font = NSFont.systemFont(ofSize: 13 * unit, weight: .bold)
-        let size = pillSize(text, font: font)
-        drawPill(text, at: NSPoint(x: (bounds.width - size.width) / 2, y: 24 * unit), font: font,
-                 fill: NSColor.black.withAlphaComponent(0.55 * state.syncBadge),
-                 text: NSColor.white.withAlphaComponent(state.syncBadge))
+        let size = pillSize(state.toast, font: font)
+        drawPill(state.toast, at: NSPoint(x: (bounds.width - size.width) / 2, y: 24 * unit), font: font,
+                 fill: NSColor.black.withAlphaComponent(0.55 * state.toastLevel),
+                 text: NSColor.white.withAlphaComponent(state.toastLevel))
     }
 
     // MARK: - 도우미

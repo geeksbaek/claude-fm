@@ -25,6 +25,8 @@ struct StageInput {
     var hour = 21
     /// 음악이 흐르는 중. 아니면 조명을 낮추고 관객이 쉰다.
     var live = false
+    /// 관객 환호(0...1). 폭죽이 터지거나 무대를 누르면 다 같이 뛴다.
+    var cheer = 0.0
 }
 
 /// 무대에서 터진 폭죽과 그 나이.
@@ -548,7 +550,7 @@ enum StageScene {
         } else {
             jump = 2
         }
-        let calm = input.live && mood == .calm
+        let calm = input.live && mood == .calm && input.cheer < 0.3
         let stickColors = [palette.primary, palette.secondary, palette.accent]
         // 후렴에는 네 박마다 응원봉 색이 다 같이 바뀐다.
         let stickColor = hook > 0.5 ? stickColors[(input.beatCount / 4) % stickColors.count] : palette.primary
@@ -565,11 +567,13 @@ enum StageScene {
                 let seed = index * 7 + row * 1_000
                 let x = index * spacing - spacing / 2 + Int(PixelNoise.signed(seed, 71) * Double(spacing) * 0.3)
                 let personal = 0.5 + PixelNoise.unit(seed, 72) * 0.8
-                let bob = -Int((hop * jump * personal).rounded())
+                // 환호할 때는 박과 상관없이 저마다의 박자로 펄쩍펄쩍 뛴다.
+                let leap = input.cheer * abs(sin(input.time * 9 + PixelNoise.unit(seed, 76) * 6.28)) * 4
+                let bob = -Int(max(hop * jump * personal, leap).rounded())
                 let headY = baseY + bob + Int(PixelNoise.unit(seed, 73) * 2)
                 // 응원봉·휴대폰 불빛을 든 손
-                let holds = PixelNoise.unit(seed, 74) < (hook > 0.5 ? 0.92 : calm ? 0.5 : 0.42)
-                if input.live, holds {
+                let holds = PixelNoise.unit(seed, 74) < (hook > 0.5 || input.cheer > 0.3 ? 0.92 : calm ? 0.5 : 0.42)
+                if input.live || input.cheer > 0.05, holds {
                     let hand = x + (PixelNoise.unit(seed, 75) > 0.5 ? headW + 1 : -2)
                     let raise = hook > 0.5 ? 10 : 7
                     if calm {
