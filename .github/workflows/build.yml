@@ -32,7 +32,7 @@ jobs:
         run: |
           ./scripts/preview.sh previews
           mkdir -p .build/tools
-          swiftc -O -module-name ClaudeFM scripts/render/main.swift $(ls Sources/ClaudeFM/*.swift | grep -v '/main.swift$') \
+          swiftc -O scripts/render/main.swift Sources/ClaudeFM/{ClawdSprite,ClawdPixels,DanceModel,PixelArt,LyricReaction}.swift \
             -o .build/tools/render
           .build/tools/render sheet previews/sheet.png
           .build/tools/render icon previews/AppIcon.iconset
