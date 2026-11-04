@@ -388,7 +388,7 @@ if started, let pool {
         encoder.appendVideo(buffer, at: startHost + time)
         encoder.drain()
     }
-    feedAudio(until: 6.2)
+    // 앱처럼 소리는 마지막 프레임 언저리까지만 와 있고, 남은 몫은 끝낼 때 조용한 칸으로 채운다.
     let finished = DispatchSemaphore(value: 0)
     encoder.finish { finished.signal() }
     check(finished.wait(timeout: .now() + 20) == .success, "굽기를 마친다")
@@ -396,13 +396,14 @@ if started, let pool {
 let encodeStats = encoder.stats
 check(failureMessage == nil, "굽다가 멈추지 않는다 \(failureMessage ?? "")")
 check(encodeStats.frames == 180 && encodeStats.dropped == 0, "프레임 180장을 다 넣는다 (\(encodeStats.frames))")
-check(encodeStats.audioFrames >= 48_000 * 6, "소리도 6초 넘게 넣는다 (\(encodeStats.audioFrames))")
+check(encodeStats.audioFrames >= 48_000 * 6 - 48, "소리도 6초를 채운다 (\(encodeStats.audioFrames))")
 let segments = store.listedSegments
 let durations = segments.map(\.duration)
 print("  조각 \(segments.count)개: \(durations.map { String(format: "%.3f", $0) }.joined(separator: " "))  코덱 \(store.codecString)")
 check(store.hasInitialization, "첫머리 조각(init)")
 check(segments.count >= 4, "1초 조각이 네 개 넘게 나온다")
-check(durations.allSatisfy { $0 >= 0.5 && $0 <= 2.1 }, "조각 길이는 0.5~2.1초")
+check(durations.dropLast().allSatisfy { $0 >= 0.5 && $0 <= 2.1 } && durations.last.map { $0 > 0 && $0 <= 2.1 } == true,
+      "조각 길이는 0.5~2.1초 (마지막 조각만 짧을 수 있다)")
 check(near(durations.reduce(0, +), 6.0, 0.35), "조각 길이를 더하면 6초쯤 (\(String(format: "%.3f", durations.reduce(0, +))))")
 check(store.codecString.hasPrefix("avc1.64") && store.codecString.hasSuffix(",mp4a.40.2"), "H.264 High 와 AAC-LC 코덱 글")
 let initData = store.initialization() ?? Data()
@@ -466,7 +467,9 @@ if let video = videoTracks.first, let reader = try? AVAssetReader(asset: asset) 
             firstVideoTime = time
             firstFrameColor = pixel(image, 1_200, 650)
         }
-        if flashVideoTime == nil, pixel(image, 80, 45).r > 200 { flashVideoTime = time }
+        // 흰 네모만 센다. 지나가는 주황 막대(빨강만 밝다)와 헷갈리지 않게 세 색이 다 밝아야 한다.
+        let mark = pixel(image, 80, 45)
+        if flashVideoTime == nil, mark.r > 200, mark.g > 200, mark.b > 200 { flashVideoTime = time }
         decodedFrames += 1
     }
     check(reader.status == .completed, "영상을 끝까지 풀어 읽는다")
@@ -860,7 +863,8 @@ if let port = stopping.start() {
     check(waitFor(5) { log.contains(.ready) }, "두 번째 연결")
     session.stopAndWait(timeout: 2)
     check(waitFor(2) { stopping.messages.contains { $0.payload.contains("\"STOP\"") && $0.payload.contains("S-1") } }, "그만 보내면 STOP")
-    check(stopping.messages.contains { $0.namespace == CastNamespace.connection && $0.payload.contains("CLOSE") }, "그리고 CLOSE")
+    check(waitFor(2) { stopping.messages.contains { $0.namespace == CastNamespace.connection && $0.payload.contains("CLOSE") } },
+          "그리고 CLOSE")
     check(waitFor(2) { log.contains(.ended(.stopped)) }, "멈춤으로 끝난다")
     stopping.stop()
 }
@@ -1018,14 +1022,15 @@ if let moov = streamed.range(of: Data("moov".utf8)) {
 
 videoTimer.cancel()
 audioTimer.cancel()
+let liveSeconds = HostClock.now() - liveStart
 let liveDone = DispatchSemaphore(value: 0)
 live.finish { liveDone.signal() }
 _ = liveDone.wait(timeout: .now() + 10)
 let liveStats = live.stats
-print("  실시간: 프레임 \(liveStats.frames)장(버림 \(liveStats.dropped)), 소리 \(liveStats.audioFrames)칸, 조각 \(liveStore.segmentCount)개")
+print("  실시간 \(String(format: "%.1f", liveSeconds))초: 프레임 \(liveStats.frames)장(버림 \(liveStats.dropped)), 소리 \(liveStats.audioFrames)칸, 조각 \(liveStore.segmentCount)개")
 check(liveFailed == nil, "실시간 굽기가 멈추지 않는다 \(liveFailed ?? "")")
-check(liveStats.frames >= 100, "실시간 프레임 대부분을 넣는다")
-check(liveStats.audioFrames > 48_000 * 2, "실시간 소리도 넣는다")
+check(Double(liveStats.frames) >= liveSeconds * 30 * 0.85, "실시간 프레임을 거의 다 넣는다")
+check(Double(liveStats.audioFrames) >= (liveSeconds - 0.3) * 48_000, "실시간 소리도 끊김 없이 넣는다")
 check(liveServer.remoteRequests.count == 0, "이 Mac 손님은 세지 않는다")
 liveServer.stop()
 server.stop()

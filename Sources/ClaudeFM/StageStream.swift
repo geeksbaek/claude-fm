@@ -591,10 +591,12 @@ final class StageStreamEncoder: NSObject, AVAssetWriterDelegate, @unchecked Send
         case .initialization:
             store.setInitialization(segmentData)
         case .separable:
+            // 조각 길이는 영상 길이를 따른다. 끝에 소리만 남은 조각이면 가장 긴 트랙의 길이를 쓴다.
             let reports = segmentReport?.trackReports ?? []
-            let timing = reports.first { $0.mediaType == .video } ?? reports.first
-            let seconds = timing.map { CMTimeGetSeconds($0.duration) } ?? settings.segmentSeconds
-            store.append(segmentData, duration: seconds.isFinite && seconds > 0 ? seconds : settings.segmentSeconds)
+            let lengths = reports.map { (video: $0.mediaType == .video, seconds: CMTimeGetSeconds($0.duration)) }
+                .filter { $0.seconds.isFinite && $0.seconds > 0 }
+            let seconds = lengths.first { $0.video }?.seconds ?? lengths.map(\.seconds).max() ?? settings.segmentSeconds
+            store.append(segmentData, duration: seconds)
         @unknown default:
             break
         }
