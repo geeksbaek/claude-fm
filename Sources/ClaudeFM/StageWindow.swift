@@ -380,7 +380,7 @@ final class StageView: NSView {
         if let performance = state.performance, let progress = performance.progress(at: now),
            let position = performance.position, let duration = performance.duration {
             hudState.songProgress = progress
-            hudState.songTime = "\(Self.clockText(position.elapsed(at: now))) / \(Self.clockText(duration))"
+            hudState.songTime = "\(Self.clockText(min(position.elapsed(at: now), duration))) / \(Self.clockText(duration))"
         }
         let sinceMouse = now - lastMouseMove
         hudState.hint = sinceMouse < 2.5 ? 1 : max(0, 1 - (sinceMouse - 2.5) / 0.6)
@@ -392,6 +392,7 @@ final class StageView: NSView {
 
     /// 3:07 처럼 분과 초.
     static func clockText(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite else { return "--:--" }
         let total = max(0, Int(seconds.rounded(.down)))
         return String(format: "%d:%02d", total / 60, total % 60)
     }

@@ -145,7 +145,7 @@ struct LyricPerformance: Equatable {
 
     /// 곡에서 얼마나 왔는지(0...1). 길이를 모르면 nil.
     func progress(at now: TimeInterval) -> Double? {
-        guard let position, let duration, duration > 1 else { return nil }
+        guard let position, let duration, duration.isFinite, duration > 1 else { return nil }
         return min(1, max(0, position.elapsed(at: now) / duration))
     }
 }

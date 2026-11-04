@@ -49,10 +49,12 @@ struct PopoverView: View {
             }
 
             // 팝오버가 열려 있으면 말풍선이 숨으므로, 지금 부르는 줄을 여기서 이어 부른다.
-            if singing.nowTitle != nil, singing.isBubbleEnabled {
+            if singing.nowTitle != nil {
                 TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
                     PopoverLyricLine(scene: singing.scene(at: ProcessInfo.processInfo.systemUptime),
-                                     karaoke: singing.isKaraokeEnabled)
+                                     karaoke: singing.isKaraokeEnabled,
+                                     lyricsWanted: singing.wantsLyrics,
+                                     playing: singing.externalSongPlaying)
                 }
                 .frame(height: 24)
             }
@@ -223,23 +225,28 @@ struct PopoverView: View {
 struct PopoverLyricLine: View {
     let scene: LyricPerformance?
     let karaoke: Bool
+    /// 말풍선이나 무대가 켜져 있어 가사를 찾는 중인지.
+    var lyricsWanted = true
+    /// 다른 앱에서 노래가 실제로 흐르는 중인지.
+    var playing = true
 
     private static let sung = Color(nsColor: NSColor(srgbRed: 0.85, green: 0.47, blue: 0.34, alpha: 1))
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             lyric
-            // 곡이 얼마나 흘렀는지 가는 막대로.
-            if let progress = scene?.progress(at: ProcessInfo.processInfo.systemUptime) {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.secondary.opacity(0.18))
+            // 곡이 얼마나 흘렀는지 가는 막대로. 길이를 몰라도 자리는 지켜 글이 들썩이지 않게 한다.
+            let progress = scene?.progress(at: ProcessInfo.processInfo.systemUptime)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.secondary.opacity(0.18))
+                    if let progress {
                         Capsule().fill(Self.sung.opacity(0.85))
                             .frame(width: max(2, proxy.size.width * CGFloat(progress)))
                     }
                 }
-                .frame(height: 2)
             }
+            .frame(height: 2)
         }
     }
 
@@ -286,8 +293,15 @@ struct PopoverLyricLine: View {
 
     /// 줄을 부르는 동안은 그 줄을, 아니면 지금 상태를 흐리게 보여 준다.
     private func shown(_ scene: LyricPerformance?) -> Shown? {
-        guard let scene else { return Shown(icon: "♪", text: "잠시 멈췄어요", progress: nil, dim: true) }
+        guard let scene else {
+            if !playing { return Shown(icon: "♪", text: "잠시 멈췄어요", progress: nil, dim: true) }
+            return Shown(icon: "♪", text: lyricsWanted ? "가사를 찾는 중…" : "가사 말풍선을 켜면 여기서도 따라 불러요",
+                         progress: nil, dim: true)
+        }
         let cue = scene.cue
+        if !lyricsWanted {
+            return Shown(icon: "♪", text: "가사 말풍선을 켜면 여기서도 따라 불러요", progress: nil, dim: true)
+        }
         if cue.isTitle { return Shown(icon: "♪", text: "전주가 흐르는 중", progress: nil, dim: true) }
         if cue.isHumming { return Shown(icon: "♪", text: "가사를 몰라서 흥얼거리는 중", progress: nil, dim: true) }
         if let recap = cue.recap { return Shown(icon: "♪", text: recap.headline + " · " + recap.caption, progress: nil, dim: true) }

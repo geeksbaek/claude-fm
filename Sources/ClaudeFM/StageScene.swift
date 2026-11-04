@@ -431,7 +431,7 @@ enum StageScene {
                 if idleMask.contains(row * columns + column) {
                     if input.banner != nil {
                         color = palette.accent.mixed(with: .white, 0.3)
-                        alpha = Int(input.time * 5) % 2 == 0 ? 1 : 0.6
+                        alpha = input.reduceMotion || Int(input.time * 5) % 2 == 0 ? 1 : 0.6
                     } else {
                         color = RGBColor.coral
                         alpha = 0.55 + 0.35 * sin(input.time * 1.4)

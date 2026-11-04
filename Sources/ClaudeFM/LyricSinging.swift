@@ -99,6 +99,9 @@ final class LyricSinging: ObservableObject {
     /// 곡이 끝까지 흘렀을 때. 다음 곡이 곧바로 시작했으면 true. 앵콜 박수를 친다.
     var onSongFinished: ((Bool) -> Void)?
     private var applaudedKey: String?
+    /// 이 곡을 실제로 재생하며 들은 초. 끝부분으로 넘기기만 한 곡은 완주로 세지 않는다.
+    private var listenedSeconds = 0.0
+    private var lastListenUptime = 0.0
 
     init(button: @escaping () -> NSButton?) {
         self.button = button
@@ -232,7 +235,11 @@ final class LyricSinging: ObservableObject {
         }
     }
 
-    private var wantsLyrics: Bool { isBubbleEnabled || stageActive }
+    /// 말풍선이나 무대가 가사를 원하는지.
+    var wantsLyrics: Bool { isBubbleEnabled || stageActive }
+
+    /// 다른 앱에서 지금 노래가 흐르는 중인지.
+    var externalSongPlaying: Bool { abs(snapshot?.rate ?? 0) > 0.05 }
 
     private func tick() {
         let now = ProcessInfo.processInfo.systemUptime
@@ -258,7 +265,7 @@ final class LyricSinging: ObservableObject {
     private func apply(_ track: NowTrack?) {
         guard let track else {
             externalPlaying = false
-            if let trackKey, finishedNaturally(snapshot, at: ProcessInfo.processInfo.systemUptime) {
+            if let trackKey, finishedNaturally(snapshot, at: ProcessInfo.processInfo.systemUptime, window: 4) {
                 applaud(trackKey, nextStarted: false)
             }
             if snapshot != nil {
@@ -300,16 +307,30 @@ final class LyricSinging: ObservableObject {
         // 같은 곡이 처음으로 돌아갔는지(한 곡 반복, 처음으로 되감기).
         let restarted = key == trackKey && abs(currentTrack.rate) > 0.05 && currentTrack.elapsed < 5
             && (snapshot.map { $0.elapsed(at: now) > 20 } ?? false)
+        // 실제로 재생하며 흐른 시간을 센다. 폴링 사이가 길게 벌어진 만큼은 세지 않는다.
+        if key == trackKey, let previous = snapshot, abs(previous.rate) > 0.05, now >= pauseGraceUntil {
+            listenedSeconds += min(max(0, now - lastListenUptime), 2)
+        }
+        lastListenUptime = now
         // 곡이 끝까지 흐른 뒤 다음 곡으로 넘어가거나, 멈추거나, 처음부터 다시 시작하면 앵콜 박수를 친다.
-        // 끝나기 전에 멈추거나 넘기면 치지 않는다.
-        if let previousKey = trackKey, now >= pauseGraceUntil, finishedNaturally(snapshot, at: now),
-           key != previousKey || abs(currentTrack.rate) <= 0.05 || restarted {
-            applaud(previousKey, nextStarted: (key != previousKey || restarted) && abs(currentTrack.rate) > 0.05)
+        // 다음 곡으로 넘어갈 때는 크로스페이드를 생각해 끝 12초 안이면 끝난 것으로 본다.
+        let changed = key != trackKey
+        if let previousKey = trackKey, now >= pauseGraceUntil,
+           changed || abs(currentTrack.rate) <= 0.05 || restarted,
+           finishedNaturally(snapshot, at: now, window: changed || restarted ? 12 : 4) {
+            applaud(previousKey, nextStarted: (changed || restarted) && abs(currentTrack.rate) > 0.05)
+            listenedSeconds = 0
+        }
+        if restarted || changed {
+            listenedSeconds = 0
         }
         if restarted {
-            // 다시 듣는 곡도 후렴 폭죽과 앵콜 박수를 다시 셀 수 있게 한다.
-            applaudedKey = nil
+            // 다시 듣는 곡도 후렴 폭죽을 다시 셀 수 있게 한다.
             lastHookStart = nil
+        }
+        if abs(currentTrack.rate) > 0.05, currentTrack.elapsed < 5 {
+            // 곡 첫머리를 듣고 있으면, 이 곡이 다시 끝까지 흐를 때 또 박수를 칠 수 있다.
+            applaudedKey = nil
         }
         snapshot = Snapshot(currentTrack, at: now)
         setNowPlaying(title: currentTrack.title, artist: currentTrack.artist)
@@ -333,14 +354,17 @@ final class LyricSinging: ObservableObject {
         present()
     }
 
-    /// 재생 중이던 곡이 끝 4초 안까지 왔는지. 30초가 안 되는 짧은 소리는 빼고 본다.
-    private func finishedNaturally(_ snapshot: Snapshot?, at now: TimeInterval) -> Bool {
+    /// 재생 중이던 곡이 끝 `window` 초 안까지 왔고, 곡 길이의 절반 넘게 실제로 들었는지.
+    /// 30초가 안 되는 짧은 소리나, 끝부분으로 넘기기만 한 곡은 빼고 본다.
+    private func finishedNaturally(_ snapshot: Snapshot?, at now: TimeInterval, window: TimeInterval) -> Bool {
         guard let snapshot, abs(snapshot.rate) > 0.05, let duration = snapshot.duration, duration > 30 else { return false }
-        return snapshot.elapsed(at: now) >= duration - 4
+        guard listenedSeconds >= duration * 0.5 else { return false }
+        return snapshot.elapsed(at: now) >= duration - window
     }
 
+    /// 완주를 알린다. 박수는 가사 반응을 켰을 때만 치지만, 완주 수는 늘 센다.
     private func applaud(_ key: String, nextStarted: Bool) {
-        guard applaudedKey != key, isReactionEnabled else { return }
+        guard applaudedKey != key else { return }
         applaudedKey = key
         onSongFinished?(nextStarted)
     }

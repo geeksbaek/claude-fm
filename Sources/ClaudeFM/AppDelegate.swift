@@ -73,12 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         singing.onHookStart = { [weak self] cue in self?.celebrate(cue.reaction) }
         // 시각이 적힌 가사가 있으면 후렴이 폭죽을 맡고, 없으면 드롭이 맡는다.
         rhythm.onSurge = { [weak self] in
-            guard let self, self.singing.isReactionEnabled, !self.singing.hasSyncedLyrics else { return }
+            guard let self, self.singing.isReactionEnabled,
+                  !(self.singing.hasSyncedLyrics && self.singing.wantsLyrics) else { return }
             self.celebrate(nil)
         }
         singing.onSongFinished = { [weak self] nextStarted in
-            self?.rhythm.countFinishedSong()
-            self?.applaud(banner: !nextStarted)
+            guard let self else { return }
+            self.rhythm.countFinishedSong()
+            if self.singing.isReactionEnabled { self.applaud(banner: !nextStarted) }
         }
         stage.onVisibilityChange = { [weak self] open in
             self?.singing.setStageActive(open)
@@ -168,9 +170,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func introduceStageOnce() {
         let key = "stageIntroShown"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
-        UserDefaults.standard.set(true, forKey: key)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            self?.singing.announce("Clawd 의 무대가 생겼어요 ♪", next: "아이콘을 누르고 무대 버튼을 눌러 보세요", seconds: 9)
+            // 말풍선을 꺼 두었거나 팝오버를 보고 있으면 다음 실행 때 알린다.
+            guard let self, self.singing.isBubbleEnabled, !self.popover.isShown else { return }
+            UserDefaults.standard.set(true, forKey: key)
+            self.singing.announce("Clawd 의 무대가 생겼어요 ♪", next: "아이콘을 누르고 무대 버튼을 눌러 보세요", seconds: 9)
         }
     }
 
@@ -209,11 +213,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return SpriteAccent(reaction: accent.reaction, hook: accent.hook)
     }
 
+    /// 박의 점프는 0.1초 안쪽이라, 재생 중이거나 춤추는 동안에는 프레임을 촘촘히 본다.
+    /// 가사를 부르거나 박수를 치는 동안에도 돌린다.
+    private var wantsAnimation: Bool {
+        player.isPlaying || rhythm.isDancing || singing.bubbleShown || stage.isOpen || singing.performance != nil
+            || ProcessInfo.processInfo.systemUptime < applauseUntil
+    }
+
     private func syncAnimation() {
-        // 박의 점프는 0.1초 안쪽이라, 재생 중이거나 춤추는 동안에는 프레임을 촘촘히 본다.
-        // 가사를 부르는 동안에도 반응 그림이 떠오르도록 돌린다.
-        let applauding = ProcessInfo.processInfo.systemUptime < applauseUntil
-        if player.isPlaying || rhythm.isDancing || singing.bubbleShown || stage.isOpen || singing.performance != nil || applauding {
+        if wantsAnimation {
             if animationTimer == nil {
                 let timer = Timer(timeInterval: Animation.danceInterval, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.tick() }
@@ -236,11 +244,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         singing.updateFeeling(rhythm.feeling())
         if pose.showsMotion != rhythm.isDancing {
             rhythm.applyDancing(pose.showsMotion)
-            if !pose.showsMotion, !player.isPlaying, !singing.bubbleShown, !stage.isOpen, singing.performance == nil,
-               ProcessInfo.processInfo.systemUptime >= applauseUntil {
-                animationTimer?.invalidate()
-                animationTimer = nil
-            }
+        }
+        // 어떤 이유로든 더 그릴 것이 없으면 프레임 타이머를 멈춘다.
+        if animationTimer != nil, !wantsAnimation {
+            animationTimer?.invalidate()
+            animationTimer = nil
         }
         let now = ProcessInfo.processInfo.systemUptime
         if now < applauseUntil {
