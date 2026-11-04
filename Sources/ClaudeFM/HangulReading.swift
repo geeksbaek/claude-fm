@@ -26,7 +26,7 @@ enum HangulReading {
                 let nextKind = self.kind(of: chars[next], hanIsJapanese: hanIsJapanese)
                 if nextKind == kind {
                     next += 1
-                } else if kind == .latin, chars[next].isWhitespace,
+                } else if kind == .latin, chars[next].isWhitespace || chars[next] == "-" || chars[next] == "&",
                           next + 1 < chars.count,
                           self.kind(of: chars[next + 1], hanIsJapanese: hanIsJapanese) == .latin {
                     next += 1
@@ -145,7 +145,9 @@ enum HangulReading {
     }()
 
     /// 일본어·영어 가사에 들어 있는 숫자를 문맥에 맞는 발음용 글자로 풀어 적는다.
-    static func expandNumbers(in text: String, hanIsJapanese: Bool, preferJapanese: Bool) -> String {
+    static func expandNumbers(in raw: String, hanIsJapanese: Bool, preferJapanese: Bool) -> String {
+        // 영어 줄에 따로 떨어진 & 는 and 로 읽는다 (Blood sweat & tears)
+        let text = raw.contains(" & ") && raw.contains(where: isLatinLetter) ? raw.replacingOccurrences(of: " & ", with: " and ") : raw
         let chars = Array(text)
         guard chars.contains(where: isAsciiDigit) else { return text }
         let lineHasCJK = chars.contains { isKana($0) || isHan($0) }
@@ -161,6 +163,7 @@ enum HangulReading {
             }
             let start = index
             var digits = ""
+            var grouped = false
             while index < chars.count {
                 if isAsciiDigit(chars[index]) {
                     digits.append(chars[index])
@@ -171,6 +174,7 @@ enum HangulReading {
                           isAsciiDigit(chars[index + 2]),
                           isAsciiDigit(chars[index + 3]),
                           (index + 4 == chars.count || !isAsciiDigit(chars[index + 4])) {
+                    grouped = true
                     index += 1
                 } else {
                     break
@@ -287,12 +291,35 @@ enum HangulReading {
                 }
                 out += ja
             } else {
-                var en = englishNumberWord(digits)
-                if index < chars.count, chars[index] == "%" {
+                // No.1, #1 은 넘버 원으로 읽는다
+                var en = ""
+                for sign in ["No. ", "No.", "no. ", "no.", "NO. ", "NO.", "#"] where out.hasSuffix(sign) {
+                    let before = out.dropLast(sign.count)
+                    guard before.last.map({ !isLatinLetter($0) }) ?? true else { continue }
+                    out = String(before)
+                    en = "number "
+                    break
+                }
+                let percent = index < chars.count && chars[index] == "%"
+                if en.isEmpty, !grouped, !percent, digits.count == 4, let value = Int(digits), let year = englishYearWord(value) {
+                    en = year
+                } else {
+                    en += englishNumberWord(digits)
+                }
+                if percent {
                     en += " percent"
                     index += 1
                 }
                 appendEnglishPiece(en, to: &out)
+                if !percent, let meridiem = englishMeridiem(chars, at: index) {
+                    // 3 a.m., 10pm
+                    out += " " + meridiem.reading
+                    index = meridiem.end
+                } else if index < chars.count, isLatinLetter(chars[index]) {
+                    // 24K, 2gether 는 띄워 읽고, 90s 의 s 는 붙인다
+                    let pluralS = (chars[index] == "s" || chars[index] == "S") && !(index + 1 < chars.count && isLatinLetter(chars[index + 1]))
+                    if !pluralS { out.append(" ") }
+                }
             }
         }
         return out
@@ -343,6 +370,32 @@ enum HangulReading {
         return (enSpellOutFormatter.string(from: NSNumber(value: value)) ?? digits)
             .replacingOccurrences(of: "-", with: " ")
             .replacingOccurrences(of: ",", with: "")
+    }
+
+    /// 숫자 뒤 a.m., pm 은 에이엠, 피엠으로 읽는다.
+    static func englishMeridiem(_ chars: [Character], at start: Int) -> (reading: String, end: Int)? {
+        var k = start
+        while k < chars.count, chars[k] == " " { k += 1 }
+        guard k < chars.count else { return nil }
+        let first = chars[k].lowercased()
+        guard first == "a" || first == "p" else { return nil }
+        var j = k + 1
+        if j < chars.count, chars[j] == "." { j += 1 }
+        guard j < chars.count, chars[j].lowercased() == "m" else { return nil }
+        j += 1
+        if j < chars.count, chars[j] == "." { j += 1 }
+        if j < chars.count, isLatinLetter(chars[j]) { return nil }
+        return (first == "a" ? "에이엠" : "피엠", j)
+    }
+
+    /// 네 자리 해는 두 자리씩 끊어 읽는다 (1999 -> nineteen ninety nine, 2024 -> twenty twenty four). 2000~2009 는 그대로.
+    static func englishYearWord(_ value: Int) -> String? {
+        guard (1100...2999).contains(value), !(2000...2009).contains(value), value % 1000 != 0 else { return nil }
+        let head = englishNumberWord(String(value / 100))
+        let low = value % 100
+        if low == 0 { return head + " hundred" }
+        if low < 10 { return head + " oh " + englishNumberWord(String(low)) }
+        return head + " " + englishNumberWord(String(low))
     }
 
     static func englishOrdinalWord(_ value: Int) -> String {
