@@ -14,6 +14,21 @@ final class RasterCanvas {
         bytes = [UInt8](repeating: 255, count: self.width * self.height * 4)
     }
 
+    /// 잘 안 바뀌는 바탕(하늘)을 기억해 두었다가 다음 프레임에 그대로 깐다.
+    private var memo: (key: AnyHashable, bytes: [UInt8])?
+
+    /// `key` 로 기억한 위쪽 `rows` 줄이 있으면 깔고 true.
+    func restore(_ key: AnyHashable, rows: Int) -> Bool {
+        guard let memo, memo.key == key, memo.bytes.count == min(rows, height) * width * 4 else { return false }
+        bytes.replaceSubrange(0..<memo.bytes.count, with: memo.bytes)
+        return true
+    }
+
+    /// 지금 위쪽 `rows` 줄을 `key` 로 기억한다.
+    func remember(_ key: AnyHashable, rows: Int) {
+        memo = (key, Array(bytes[0..<(min(rows, height) * width * 4)]))
+    }
+
     func clear(_ color: RGBColor) {
         let r = Self.byte(color.r), g = Self.byte(color.g), b = Self.byte(color.b)
         bytes.withUnsafeMutableBufferPointer { buffer in

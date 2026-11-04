@@ -126,7 +126,25 @@ enum StageScene {
 
     private static let bayer: [Double] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map { ($0 + 0.5) / 16 }
 
+    private struct SkyKey: Hashable {
+        var width: Int
+        var rows: Int
+        var top: RGBColor
+        var bottom: RGBColor
+        var horizon: RGBColor
+    }
+
     private static func drawSky(_ canvas: RasterCanvas, _ layout: StageLayout, sky: Sky, time: Double) {
+        let bottomY = layout.floorTop
+        let key = SkyKey(width: layout.width, rows: bottomY, top: sky.top, bottom: sky.bottom, horizon: sky.horizon)
+        if !canvas.restore(key, rows: bottomY) {
+            drawSkyGradient(canvas, layout, sky: sky)
+            canvas.remember(key, rows: bottomY)
+        }
+        drawStars(canvas, layout, sky: sky, time: time)
+    }
+
+    private static func drawSkyGradient(_ canvas: RasterCanvas, _ layout: StageLayout, sky: Sky) {
         let bottomY = layout.floorTop
         let bands = 9.0
         for y in 0..<bottomY {
@@ -146,7 +164,9 @@ enum StageScene {
             let y = bottomY - 1 - row
             canvas.span(0, layout.width - 1, y, sky.horizon, 0.10 * (1 - Double(row) / Double(max(4, layout.height / 18))), additive: true)
         }
-        // 별
+    }
+
+    private static func drawStars(_ canvas: RasterCanvas, _ layout: StageLayout, sky: Sky, time: Double) {
         let count = Int(Double(layout.width * layout.floorTop) / 160 * sky.stars)
         for index in 0..<count {
             let x = Int(PixelNoise.unit(index, 11) * Double(layout.width))

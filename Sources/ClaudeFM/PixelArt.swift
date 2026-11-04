@@ -1,7 +1,7 @@
 import Foundation
 
 /// 화면 종류와 무관한 sRGB 색. AppKit 쪽에서 NSColor·CGColor 로 바꿔 쓴다.
-struct RGBColor: Equatable {
+struct RGBColor: Hashable {
     var r: Double
     var g: Double
     var b: Double

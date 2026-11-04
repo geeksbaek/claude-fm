@@ -270,8 +270,11 @@ final class StageView: NSView {
         let hearing = state.pose.showsMotion || (state.spectrum.max() ?? 0) > 0.05
         var spectrum = state.spectrum
         if live, !hearing {
-            spectrum = (0..<SpectrumMeter.bandCount).map { band in
-                0.32 + 0.22 * sin(now * 2.1 + Double(band) * 0.8) + 0.08 * sin(now * 5.3 + Double(band) * 2.1)
+            spectrum = (0..<SpectrumMeter.bandCount).map { band -> Double in
+                let offset = Double(band)
+                let slow: Double = sin(now * 2.1 + offset * 0.8)
+                let fast: Double = sin(now * 5.3 + offset * 2.1)
+                return 0.32 + 0.22 * slow + 0.08 * fast
             }
         }
         var input = StageInput()
