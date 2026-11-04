@@ -111,7 +111,7 @@ let bubbleCases: [BubbleCase] = [
                                                     next: "돈트 고", start: 10, end: 16), elapsed: 14.2),
     BubbleCase(name: "hook", cue: line("반짝반짝 빛나는 별처럼", next: "우리 함께라면", start: 30, end: 33, reaction: .star, hook: true),
                elapsed: 31.0, feeling: beatFeeling),
-    BubbleCase(name: "countdown", cue: countdownCue, elapsed: 18.4, style: BubbleStyle(karaoke: true, reactions: true, beatPeriod: 0.5)),
+    BubbleCase(name: "countdown", cue: countdownCue, elapsed: 18.8, style: BubbleStyle(karaoke: true, reactions: true, beatPeriod: 0.5)),
     BubbleCase(name: "title", cue: .title("Supernova", artist: "aespa"), elapsed: nil),
     BubbleCase(name: "recap", cue: recapCue, elapsed: nil),
     BubbleCase(name: "shout", cue: line("소리 질러!!", next: nil, start: 40, end: 41.5, reaction: .fire), elapsed: 41.0,
@@ -201,3 +201,151 @@ func spriteSheet(appearance: NSAppearance, background: NSColor, ink: NSColor) ->
 
 write(spriteSheet(appearance: light, background: NSColor(srgbRed: 0.98, green: 0.96, blue: 0.92, alpha: 1),
                   ink: NSColor(srgbRed: 0.16, green: 0.15, blue: 0.13, alpha: 1)), "sprite-reactions.png")
+
+// MARK: - 무대
+
+/// 픽셀 무대를 이웃 픽셀로 키워 깔고, 그 위에 글자 층을 그린다.
+@MainActor
+func renderStage(_ input: StageInput, hud: StageHUDView.State, size: NSSize = NSSize(width: 960, height: 540)) -> NSBitmapImageRep {
+    let scale: CGFloat = 2
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    let context = NSGraphicsContext(bitmapImageRep: rep)!
+    NSGraphicsContext.current = context
+    let cg = context.cgContext
+    cg.scaleBy(x: scale, y: scale)
+    let pixelScale = max(1, Int((size.height / 180).rounded()))
+    let width = Int((size.width / CGFloat(pixelScale)).rounded(.up))
+    let height = Int((size.height / CGFloat(pixelScale)).rounded(.up))
+    let canvas = RasterCanvas(width: width, height: height)
+    StageScene.render(input, into: canvas)
+    if let image = canvas.makeImage() {
+        cg.interpolationQuality = .none
+        let drawn = CGSize(width: CGFloat(width * pixelScale), height: CGFloat(height * pixelScale))
+        cg.draw(image, in: CGRect(x: (size.width - drawn.width) / 2, y: (size.height - drawn.height) / 2,
+                                  width: drawn.width, height: drawn.height))
+    }
+    cg.translateBy(x: 0, y: size.height)
+    cg.scaleBy(x: 1, y: -1)
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: true)
+    let view = StageHUDView(frame: NSRect(origin: .zero, size: size))
+    view.update(hud)
+    dark.performAsCurrentDrawingAppearance {
+        view.draw(view.bounds)
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+
+struct StageCase {
+    var name: String
+    var configure: (inout StageInput, inout StageHUDView.State) -> Void
+}
+
+func stageLine(_ text: String, original: String = "", next: String?, start: Double, end: Double,
+               reaction: LyricReaction? = nil, hook: Bool = false) -> LyricCue {
+    var cue = line(text, next: next, start: start, end: end, reaction: reaction, hook: hook)
+    cue.original = original
+    return cue
+}
+
+let stageCases: [StageCase] = [
+    StageCase(name: "karaoke") { input, hud in
+        hud.cue = stageLine("사쿠라 히라히라 마이오리테 오치테", original: "桜ひらひら舞い降りて落ちて",
+                            next: "유레루 오모이노 타케", start: 10, end: 14, reaction: .flower)
+        hud.elapsed = 12.1
+        hud.title = "桜流し"
+        hud.subtitle = "宇多田ヒカル"
+        hud.bpm = 92
+        hud.moodLabel = "리듬"
+        input.reaction = .flower
+        input.reactionLevel = 1
+        input.accent = SpriteAccent(reaction: .flower, hook: false)
+    },
+    StageCase(name: "hook") { input, hud in
+        hud.cue = stageLine("너를 사랑해 영원히", next: "하늘 위로 날아가", start: 30, end: 33, reaction: .love, hook: true)
+        hud.elapsed = 31.6
+        hud.title = "First Love"
+        hud.subtitle = "Clawd & Friends"
+        hud.bpm = 128
+        hud.moodLabel = "빠름"
+        input.pose = DancePose(active: true, hop: 1, stepRight: true, mood: .drive, style: .handsUp, danceTime: 30)
+        input.hookLevel = 1
+        input.reaction = .love
+        input.reactionLevel = 1
+        input.accent = SpriteAccent(reaction: .love, hook: true)
+        var burst = ConfettiBurst(originX: 26, originY: 176, scale: 0.9, count: 54, seed: 9,
+                                  colors: MoodPalette.of(.drive).confetti, glyph: .love, upward: true)
+        input.bursts = [StageBurst(burst: burst, age: 0.85)]
+        burst.originX = 294
+        burst.seed = 40
+        input.bursts.append(StageBurst(burst: burst, age: 0.8))
+    },
+    StageCase(name: "title") { input, hud in
+        hud.cue = .title("Supernova", artist: "aespa")
+        hud.cueAge = 1
+        hud.title = "Supernova"
+        hud.subtitle = "aespa"
+        input.pose.mood = .bright
+    },
+    StageCase(name: "countdown") { input, hud in
+        var cue = LyricCue.interlude(next: "다시 한 번 너에게로")
+        cue.nextStart = 50
+        hud.cue = cue
+        hud.elapsed = 48.8
+        hud.beatPeriod = 0.5
+        hud.title = "Interlude"
+        hud.subtitle = "Clawd"
+        hud.bpm = 120
+        input.pose.mood = .bass
+        input.reaction = .moon
+        input.reactionLevel = 1
+    },
+    StageCase(name: "recap") { input, hud in
+        hud.cue = .recap(LyricRecap(reaction: .love, word: "love", count: 12))
+        hud.cueAge = 1
+        hud.title = "Love Song"
+        hud.subtitle = "Clawd"
+        input.pose = DancePose(active: true, hop: 0.4, stepRight: false, mood: .calm, style: .waveTilt, danceTime: 40)
+    },
+    StageCase(name: "live") { input, hud in
+        hud.title = "Claude FM — lofi beats to code to"
+        hud.subtitle = "Claude FM"
+        hud.live = true
+        hud.bpm = 84
+        hud.moodLabel = "잔잔"
+        input.playing = true
+        input.pose = DancePose(active: true, hop: 0.5, stepRight: false, mood: .calm, style: .bounce, danceTime: 6)
+        input.hour = 2
+    },
+    StageCase(name: "idle") { input, hud in
+        input.live = false
+        input.pose = .idle
+        input.spectrum = Array(repeating: 0, count: SpectrumMeter.bandCount)
+        hud.idle = true
+    },
+]
+
+MainActor.assumeIsolated {
+    for item in stageCases {
+        var input = StageInput()
+        input.time = 12.3
+        input.spriteFrame = 5
+        input.live = true
+        input.spectrum = [0.9, 0.8, 0.65, 0.7, 0.55, 0.45, 0.35, 0.2]
+        input.pose = DancePose(active: true, hop: 0.9, stepRight: false, mood: .groove, style: .bounce, danceTime: 2)
+        input.feeling.wave = 0.6
+        input.feeling.bass = 0.5
+        input.beatCount = 6
+        input.beatPhase = 0.2
+        var hud = StageHUDView.State()
+        hud.idle = false
+        hud.karaoke = true
+        item.configure(&input, &hud)
+        hud.palette = MoodPalette.of(input.pose.mood == .quiet ? .groove : input.pose.mood)
+        hud.hop = input.pose.active ? input.pose.hop : 0
+        write(renderStage(input, hud: hud), "stage-\(item.name).png")
+    }
+}

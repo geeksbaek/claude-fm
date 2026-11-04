@@ -14,6 +14,8 @@ final class RhythmDance: ObservableObject {
     var onActivityChange: (() -> Void)?
     /// 오디오 파장이 들어올 때마다 가사 말풍선에 실시간 필링(외침·속삭임·파장)을 전달한다.
     var onFeelingChange: ((VocalFeeling) -> Void)?
+    /// 잔잔하다가 크게 터지는 순간(드롭). 가사가 없는 곡에서 폭죽을 터뜨린다.
+    var onSurge: (() -> Void)?
 
     private var clock = BeatClock()
     private var meter = SpectrumMeter()
@@ -94,6 +96,7 @@ final class RhythmDance: ObservableObject {
     private func ingest(_ chunk: SystemAudioTap.Chunk) {
         let now = ProcessInfo.processInfo.systemUptime
         let beatsBefore = clock.beatCount
+        let surgesBefore = clock.surgeCount
         clock.ingest(low: chunk.low, high: chunk.high, full: chunk.full, dt: chunk.dt, now: now)
         let bands = chunk.bands
         meter.ingest((0..<SpectrumMeter.bandCount).map { bands[$0] }, dt: chunk.dt, now: now,
@@ -117,6 +120,7 @@ final class RhythmDance: ObservableObject {
         }
         if motionChanged || moodChanged || clock.beatCount != beatsBefore { onActivityChange?() }
         onFeelingChange?(clock.feeling(at: now))
+        if clock.surgeCount != surgesBefore { onSurge?() }
         guard debug, now - lastDebugLog > 1 else { return }
         lastDebugLog = now
         let line = String(format: "full=%.6f low=%.6f high=%.6f beats=%d dancing=%@ mood=%@ access=%@\n",

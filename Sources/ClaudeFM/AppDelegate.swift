@@ -66,7 +66,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
         singing.beatPeriod = { [weak self] in self?.rhythm.beatPeriod }
+        singing.stageIsVisible = { [weak self] in self?.stage.isShowingOnActiveSpace ?? false }
         singing.onHookStart = { [weak self] cue in self?.celebrate(cue.reaction) }
+        // 시각이 적힌 가사가 있으면 후렴이 폭죽을 맡고, 없으면 드롭이 맡는다.
+        rhythm.onSurge = { [weak self] in
+            guard let self, self.singing.isReactionEnabled, !self.singing.hasSyncedLyrics else { return }
+            self.celebrate(nil)
+        }
         stage.onVisibilityChange = { [weak self] open in
             self?.singing.setStageActive(open)
             self?.syncAnimation()
@@ -162,6 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         snapshot.karaoke = singing.isKaraokeEnabled
         snapshot.reactions = singing.isReactionEnabled
         snapshot.radioTitle = player.title
+        snapshot.needsPermission = rhythm.needsPermission
         return snapshot
     }
 

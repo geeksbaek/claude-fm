@@ -92,6 +92,8 @@ final class LyricSinging: ObservableObject {
     var onHookStart: ((LyricCue) -> Void)?
     /// 간주 끝 카운트다운을 박에 맞추려고 박 간격을 묻는다.
     var beatPeriod: (() -> Double?)?
+    /// 무대가 지금 화면에 보이는지. 보일 때만 말풍선을 숨긴다.
+    var stageIsVisible: (() -> Bool)?
 
     init(button: @escaping () -> NSButton?) {
         self.button = button
@@ -393,7 +395,7 @@ final class LyricSinging: ObservableObject {
     private func showsTitleCard(at elapsed: TimeInterval) -> Bool {
         guard let song, !song.instrumental, song.synced else { return true }
         guard let first = song.lines.first(where: { !$0.text.isEmpty }) else { return true }
-        return elapsed < first.time - 3.2
+        return elapsed < first.time - LyricCue.countdownBeat(beatPeriod?()) * Double(LyricCue.countdownDots) - 0.6
     }
 
     private func present() {
@@ -424,7 +426,8 @@ final class LyricSinging: ObservableObject {
             return
         }
         preview = nil
-        guard isBubbleEnabled, !suppressed, !stageActive, let scene, let anchor = anchor() else {
+        let stageCovers = stageActive && (stageIsVisible?() ?? true)
+        guard isBubbleEnabled, !suppressed, !stageCovers, let scene, let anchor = anchor() else {
             hideBubble()
             return
         }

@@ -183,6 +183,27 @@ check(gappyBeats.count >= 19, "묻힌 박을 채운다 \(gappyBeats.count)")
 let gappyIntervals = zip(gappyBeats.dropFirst(), gappyBeats).map { $0 - $1 }
 check(gappyIntervals.allSatisfy { $0 > 0.45 && $0 < 0.58 }, "채운 박 간격 \(gappyIntervals)")
 
+// 잔잔하다가 저음과 함께 크게 터지면 드롭으로 센다. 고르게 시끄럽기만 하면 세지 않는다.
+func runSurge(breakdown: Bool) -> Int {
+    var clock = BeatClock()
+    for step in 0..<(60 * 40) {
+        let t = Double(step) / 60
+        let kick = step % 30 == 0
+        var low = kick ? 2e-3 : 2e-4, full = kick ? 3e-3 : 4e-4
+        if breakdown, t >= 24, t < 28 {
+            low = 2e-5
+            full = 5e-5
+        } else if breakdown, t >= 28 {
+            low = kick ? 2e-2 : 2e-3
+            full = kick ? 2.6e-2 : 3e-3
+        }
+        clock.ingest(low: low, high: 1e-4, full: full, dt: 1.0 / 60, now: t)
+    }
+    return clock.surgeCount
+}
+check(runSurge(breakdown: true) == 1, "드롭을 한 번 센다 \(runSurge(breakdown: true))")
+check(runSurge(breakdown: false) == 0, "고른 곡에서는 드롭이 없다 \(runSurge(breakdown: false))")
+
 // MARK: - 픽셀 그림·폭죽·전광판
 
 for reaction in LyricReaction.allCases {

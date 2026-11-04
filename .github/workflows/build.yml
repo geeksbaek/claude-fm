@@ -20,12 +20,15 @@ jobs:
           swift --version
 
       - name: Build app
-        run: swift build -c release --product ClaudeFM 2>&1 | tee build.log
+        shell: bash
+        run: swift build -c release --product ClaudeFM
 
       - name: Logic checks
+        shell: bash
         run: ./scripts/check.sh
 
       - name: Render previews
+        shell: bash
         run: |
           ./scripts/preview.sh previews
           mkdir -p .build/tools

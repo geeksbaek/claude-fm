@@ -844,32 +844,31 @@ final class BubbleView: NSView {
         var notesFade: CGFloat = 0
     }
 
-    /// 노래방처럼 다음 줄이 오기 전 세 박을 점으로 센다.
+    /// 노래방처럼 다음 줄이 오기 전 네 박을 점으로 센다.
     private func countdownState() -> Countdown {
         guard isInterlude, let cue, let elapsed = songElapsed, let remaining = cue.countdown(at: elapsed) else { return Countdown() }
-        var unit = 0.75
-        if let period = style.beatPeriod, period >= 0.3, period <= 1.2 { unit = period }
-        let window = min(unit * 3, 3.2)
-        unit = window / 3
+        let unit = LyricCue.countdownBeat(style.beatPeriod)
+        let window = unit * Double(LyricCue.countdownDots)
         guard remaining <= window + 0.35 else { return Countdown() }
         var state = Countdown()
         state.notesFade = CGFloat(min(1, max(0, (window + 0.35 - remaining) / 0.35)))
         guard remaining <= window else { return state }
         let ticks = remaining / unit
-        state.dots = min(3, Int(ceil(ticks)))
+        state.dots = min(LyricCue.countdownDots, Int(ceil(ticks)))
         state.fading = ticks == floor(ticks) ? 0 : CGFloat(1 - (ticks - floor(ticks)))
         return state
     }
 
     private func drawCountdownDots(_ countdown: Countdown, in rect: NSRect, lineHeight: CGFloat, alpha: CGFloat) {
         guard countdown.dots > 0 else { return }
+        let total = LyricCue.countdownDots
         let spacing: CGFloat = 15
         let radius: CGFloat = 3.4
         let centerY = rect.minY + lineHeight / 2
-        let startX = rect.midX - spacing
-        for index in 0..<3 {
+        let startX = rect.midX - spacing * CGFloat(total - 1) / 2
+        for index in 0..<total {
             // 왼쪽 점부터 사라져서 마지막 점이 가사 쪽에 남는다.
-            let visibleFrom = 3 - countdown.dots
+            let visibleFrom = total - countdown.dots
             guard index >= visibleFrom else { continue }
             var scale: CGFloat = 1
             var dotAlpha = alpha
@@ -886,7 +885,7 @@ final class BubbleView: NSView {
         }
     }
 
-    /// 말풍선 오른쪽 위 모서리에 반응 그림을 붙인다. 새 줄이 오면 톡 튀어나온다.
+    /// 말풍선 위 모서리에 반응 그림을 붙인다. 꼬리와 겹치지 않게 꼬리 반대쪽 모서리를 고르고, 새 줄이 오면 톡 튀어나온다.
     private func drawReactionSticker(_ reaction: LyricReaction, dx: CGFloat, dy: CGFloat, beat: CGFloat, entering: CGFloat) {
         let glyph = PixelGlyph.reaction(reaction)
         let age = max(0, now - cueShownAt)
@@ -894,9 +893,9 @@ final class BubbleView: NSView {
         let overshoot = pop < 1 ? 1 + sin(pop * .pi) * 0.25 : 1
         let pixel = 2 * overshoot * max(0.4, pop)
         let size = pixel * 5
-        let right = bounds.width - Self.outerPad + dx
         let top = Self.outerPad + Self.tail + dy
-        let x = right - size * 0.82
+        let onLeft = tailX > bounds.width * 0.62
+        let x = onLeft ? Self.outerPad + dx - size * 0.18 : bounds.width - Self.outerPad + dx - size * 0.82
         let y = top - size * 0.45 - beat * 2.2
         drawGlyph(glyph, x: x, y: y, pixel: pixel, alpha: min(1, entering * 1.4))
     }

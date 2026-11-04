@@ -18,6 +18,8 @@ struct StageSnapshot {
     var reactions = true
     /// Claude FM 영상 제목.
     var radioTitle = "Claude FM"
+    /// 시스템 오디오 권한이 없어 소리를 못 듣는 중.
+    var needsPermission = false
 }
 
 /// 콘서트 무대 창. 픽셀 무대 위에 가사와 곡 정보를 얹는다.
@@ -25,6 +27,7 @@ struct StageSnapshot {
 final class StageWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var stageView: StageView?
+    private var occlusionObserver: NSObjectProtocol?
     private let snapshot: () -> StageSnapshot
     /// 무대가 열리고 닫힐 때. 말풍선을 숨기고 가사를 찾게 한다.
     var onVisibilityChange: ((Bool) -> Void)?
@@ -92,7 +95,7 @@ final class StageWindowController: NSObject, NSWindowDelegate {
         window.contentView = view
         window.center()
         window.setFrameAutosaveName("ClaudeFMStage")
-        NotificationCenter.default.addObserver(
+        occlusionObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.stageView?.syncRunning() }
@@ -129,7 +132,6 @@ final class StageView: NSView {
     private var syncShownAt: TimeInterval = -10
     private var syncValue = 0.0
     private var trackingArea: NSTrackingArea?
-    private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
     var onTogglePlayback: (() -> Void)?
     var onNudgeSync: ((Double) -> Void)?
 
@@ -159,7 +161,8 @@ final class StageView: NSView {
 
     func start() {
         layoutCanvas()
-        syncRunning()
+        // 창이 막 열린 참이라 가림 상태가 아직 갱신되지 않았을 수 있다. 일단 돌리고, 가려지면 그때 쉰다.
+        startTimer()
         tick()
     }
 
@@ -171,16 +174,21 @@ final class StageView: NSView {
     /// 창이 가려지면 쉬고, 다시 보이면 이어 그린다.
     func syncRunning() {
         let visible = window.map { $0.isVisible && $0.occlusionState.contains(.visible) } ?? false
-        if visible, timer == nil {
-            lastTick = ProcessInfo.processInfo.systemUptime
-            let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.tick() }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            self.timer = timer
-        } else if !visible {
+        if visible {
+            startTimer()
+        } else {
             stop()
         }
+    }
+
+    private func startTimer() {
+        guard timer == nil else { return }
+        lastTick = ProcessInfo.processInfo.systemUptime
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     /// 무대 양옆에서 위로 쏘고, 가운데 위에서 쏟아지는 폭죽.
@@ -258,14 +266,22 @@ final class StageView: NSView {
         let live = state.playing || state.pose.showsMotion || state.performance != nil
         var pose = state.pose
         if hookLevel > 0.5, pose.active { pose.style = .handsUp }
+        // 소리를 못 듣는 동안(권한이 없거나 아주 작을 때)에는 흥얼거리고, 전광판은 잔잔한 물결로 움직인다.
+        let hearing = state.pose.showsMotion || (state.spectrum.max() ?? 0) > 0.05
+        var spectrum = state.spectrum
+        if live, !hearing {
+            spectrum = (0..<SpectrumMeter.bandCount).map { band in
+                0.32 + 0.22 * sin(now * 2.1 + Double(band) * 0.8) + 0.08 * sin(now * 5.3 + Double(band) * 2.1)
+            }
+        }
         var input = StageInput()
         input.time = now
         input.spriteFrame = Animation.frame(at: Date())
         input.pose = pose
-        input.playing = state.playing
+        input.playing = state.playing || (live && !hearing)
         input.accent = state.accent
         input.feeling = state.feeling
-        input.spectrum = state.spectrum
+        input.spectrum = spectrum
         input.beatCount = state.beatCount
         input.beatPhase = state.beatPhase
         input.reaction = shownReaction
@@ -275,7 +291,7 @@ final class StageView: NSView {
         input.hour = Calendar.current.component(.hour, from: Date())
         input.live = live
         StageScene.render(input, into: canvas)
-        pixelLayer.contents = makeImage()
+        pixelLayer.contents = canvas.makeImage()
 
         let key = cue.map { "\($0.current)|\($0.start ?? -1)|\($0.isTitle)|\($0.recap != nil)" }
         if key != lastCueKey {
@@ -305,30 +321,13 @@ final class StageView: NSView {
             hudState.subtitle = state.mood.caption ?? ""
         }
         hudState.idle = !live
+        hudState.needsPermission = state.needsPermission && !hearing
         let sinceMouse = now - lastMouseMove
         hudState.hint = sinceMouse < 2.5 ? 1 : max(0, 1 - (sinceMouse - 2.5) / 0.6)
         let sinceSync = now - syncShownAt
         hudState.syncBadge = sinceSync < 1.6 ? min(1, (1.6 - sinceSync) / 0.3) : 0
         hudState.syncOffset = syncValue
         hud.update(hudState)
-    }
-
-    private func makeImage() -> CGImage? {
-        let data = Data(canvas.bytes)
-        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
-        return CGImage(
-            width: canvas.width,
-            height: canvas.height,
-            bitsPerComponent: 8,
-            bitsPerPixel: 32,
-            bytesPerRow: canvas.width * 4,
-            space: Self.colorSpace,
-            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-            provider: provider,
-            decode: nil,
-            shouldInterpolate: false,
-            intent: .defaultIntent
-        )
     }
 
     // MARK: - 입력
@@ -398,11 +397,13 @@ final class StageHUDView: NSView {
         var syncOffset = 0.0
         var palette = MoodPalette.of(.groove)
         var hop = 0.0
+        var needsPermission = false
 
         /// 프레임마다 바뀌는 값을 뺀 나머지가 같으면 위쪽 글자는 다시 그리지 않는다.
         func sameHeader(as other: State) -> Bool {
             title == other.title && subtitle == other.subtitle && live == other.live && bpm == other.bpm
                 && moodLabel == other.moodLabel && syncBadge == other.syncBadge && syncOffset == other.syncOffset
+                && needsPermission == other.needsPermission
         }
     }
 
@@ -623,7 +624,8 @@ final class StageHUDView: NSView {
             drawCentered(fit(next, font: nextFont, width: maxWidth), y: bottom - nextHeight, font: nextFont,
                          color: NSColor.white.withAlphaComponent(0.5))
         }
-        if let elapsed = state.elapsed, let remainingTime = cue.countdown(at: elapsed), remainingTime <= 3.2 {
+        if let elapsed = state.elapsed, let remainingTime = cue.countdown(at: elapsed),
+           remainingTime <= LyricCue.countdownBeat(state.beatPeriod) * Double(LyricCue.countdownDots) {
             drawCountdown(cue, centerY: top - (original.isEmpty ? 16 : 34) * unit)
         }
     }
@@ -631,16 +633,14 @@ final class StageHUDView: NSView {
     /// 노래방 카운트다운: 다음 줄까지 남은 박을 큰 점으로 센다.
     private func drawCountdown(_ cue: LyricCue, centerY: CGFloat) {
         guard let elapsed = state.elapsed, let remaining = cue.countdown(at: elapsed) else { return }
-        var unitTime = 0.75
-        if let period = state.beatPeriod, period >= 0.3, period <= 1.2 { unitTime = period }
-        let window = min(unitTime * 3, 3.2)
-        unitTime = window / 3
-        guard remaining <= window else { return }
-        let dots = min(3, Int(ceil(remaining / unitTime)))
+        let beat = LyricCue.countdownBeat(state.beatPeriod)
+        let total = LyricCue.countdownDots
+        guard remaining <= beat * Double(total) else { return }
+        let dots = min(total, Int(ceil(remaining / beat)))
         let radius = 7 * unit
         let spacing = 30 * unit
-        for index in 0..<3 where index >= 3 - dots {
-            let x = bounds.width / 2 + CGFloat(index - 1) * spacing
+        for index in 0..<total where index >= total - dots {
+            let x = bounds.width / 2 + (CGFloat(index) - CGFloat(total - 1) / 2) * spacing
             let rect = NSRect(x: x - radius, y: centerY - radius, width: radius * 2, height: radius * 2)
             state.palette.accent.nsColor(alpha: 0.95).setFill()
             NSBezierPath(ovalIn: rect).fill()
@@ -660,6 +660,14 @@ final class StageHUDView: NSView {
     }
 
     private func drawSyncBadge() {
+        if state.needsPermission, state.syncBadge <= 0.01 {
+            let text = "시스템 오디오 녹음을 허용하면 무대가 음악에 맞춰 춤춰요"
+            let font = NSFont.systemFont(ofSize: 12 * unit, weight: .semibold)
+            let size = pillSize(text, font: font)
+            drawPill(text, at: NSPoint(x: (bounds.width - size.width) / 2, y: 24 * unit), font: font,
+                     fill: NSColor.black.withAlphaComponent(0.5), text: NSColor.white.withAlphaComponent(0.85))
+            return
+        }
         guard state.syncBadge > 0.01 else { return }
         let value = state.syncOffset
         let text = value == 0 ? "가사 싱크 맞춤" : String(format: "가사 %@ %.1f초", value > 0 ? "늦게" : "빠르게", abs(value))
@@ -729,5 +737,28 @@ final class StageHUDView: NSView {
             if (candidate as NSString).size(withAttributes: attrs).width <= width { return candidate }
         }
         return text
+    }
+}
+
+extension RasterCanvas {
+    private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+
+    /// 픽셀 판을 그대로 CGImage 로. 화면에서는 이웃 픽셀 그대로 키운다.
+    func makeImage() -> CGImage? {
+        let data = Data(bytes)
+        guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: Self.colorSpace,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )
     }
 }

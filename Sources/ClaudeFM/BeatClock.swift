@@ -25,6 +25,10 @@ struct BeatClock {
     static let audibleEnergy = 8e-6
 
     private(set) var beatCount = 0
+    /// 잔잔한 구간 뒤에 저음과 함께 크게 터진 순간(드롭)을 센다. 가사가 없는 곡의 폭죽에 쓴다.
+    private(set) var surgeCount = 0
+    private var lastQuiet = -1.0
+    private var lastSurge = -1_000.0
 
     private var prevLow = 0.0
     private var prevHigh = 0.0
@@ -180,10 +184,22 @@ struct BeatClock {
             : Self.smooth(whisperEnv, targetWhisper, dt: dt, attack: 0.14, release: 0.38)
 
         let audible = lastLoud >= 0 && now - lastLoud < 1.8
+        detectSurge(hit: hit, audible: audible, now: now)
         let next: MusicMood = audible
             ? Self.classify(low: lowEnv, high: highEnv, full: fullEnv, period: period)
             : .quiet
         updateMood(next, now: now)
+    }
+
+    /// 숨을 죽인 구간(평소보다 작은 소리)이 몇 초 안에 있었고, 박과 함께 저음이 크게 들어오면 드롭으로 본다.
+    /// 춤춘 지 20초는 지나야 하고, 한 번 터지면 40초는 쉰다.
+    private mutating func detectSurge(hit: Bool, audible: Bool, now: Double) {
+        guard audible else { return }
+        if waveEnv < 0.32 { lastQuiet = now }
+        guard hit, shoutEnv > 0.62, bassEnv > 0.55, lastQuiet >= 0, now - lastQuiet < 6,
+              danceSince >= 0, now - danceSince > 20, now - lastSurge > 40 else { return }
+        lastSurge = now
+        surgeCount += 1
     }
 
     func pose(at now: Double) -> DancePose {

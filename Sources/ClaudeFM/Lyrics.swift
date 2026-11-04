@@ -102,6 +102,16 @@ struct LyricCue: Equatable {
         return 1
     }
 
+    /// 간주 끝에 세는 박 수.
+    static let countdownDots = 4
+
+    /// 카운트다운 한 칸의 길이. 박을 잡았으면 한 박, 아니면 0.75초. 너무 길면 줄인다.
+    static func countdownBeat(_ period: Double?) -> Double {
+        var unit = 0.75
+        if let period, period >= 0.3, period <= 1.2 { unit = period }
+        return min(unit, 3.4 / Double(countdownDots))
+    }
+
     /// 다음 줄(또는 아직 시작하지 않은 지금 줄)까지 남은 초. 간주 끝 카운트다운에 쓴다.
     func countdown(at elapsed: TimeInterval) -> TimeInterval? {
         if isInterlude, let nextStart, nextStart > elapsed { return nextStart - elapsed }
