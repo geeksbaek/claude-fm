@@ -9,6 +9,8 @@ final class RhythmDance: ObservableObject {
     @Published private(set) var needsPermission = false
     /// 박 간격이 안정됐을 때의 빠르기. 70~180 사이로 접어서 보여 준다.
     @Published private(set) var bpm: Int?
+    /// 오늘 함께 춤춘 시간과 박 수. 5초마다 모아서 올린다.
+    @Published private(set) var today = RhythmDance.loadDaily()
 
     /// 춤이 시작·끝나거나 새 박이 들어올 때. 메뉴바 아이콘을 바로 갱신한다.
     var onActivityChange: (() -> Void)?
@@ -19,6 +21,11 @@ final class RhythmDance: ObservableObject {
 
     private var clock = BeatClock()
     private var meter = SpectrumMeter()
+    private static let dailyKey = "dailyRhythm"
+    private var pendingSeconds = 0.0
+    private var pendingBeats = 0
+    private var lastDailyFlush = 0.0
+    private var lastDailySave = 0.0
     private let tap = SystemAudioTap()
     private var accessTimer: Timer?
     private var heardAudio = false
@@ -42,6 +49,7 @@ final class RhythmDance: ObservableObject {
     }
 
     func stop() {
+        flushDaily(save: true)
         accessTimer?.invalidate()
         accessTimer = nil
         guard #available(macOS 14.2, *) else { return }
@@ -119,6 +127,14 @@ final class RhythmDance: ObservableObject {
             bpm = tempo
         }
         if motionChanged || moodChanged || clock.beatCount != beatsBefore { onActivityChange?() }
+        if pose.active {
+            pendingSeconds += chunk.dt
+            pendingBeats += max(0, clock.beatCount - beatsBefore)
+        }
+        if now - lastDailyFlush >= 5 {
+            lastDailyFlush = now
+            flushDaily(save: now - lastDailySave >= 30)
+        }
         onFeelingChange?(clock.feeling(at: now))
         if clock.surgeCount != surgesBefore { onSurge?() }
         guard debug, now - lastDebugLog > 1 else { return }
@@ -127,6 +143,27 @@ final class RhythmDance: ObservableObject {
                           chunk.full, chunk.low, chunk.high, clock.beatCount, moving ? "yes" : "no",
                           String(describing: pose.mood), String(describing: lastAccess))
         NSLog("[ClaudeFM] rhythm \(line.trimmingCharacters(in: .whitespacesAndNewlines))")
+    }
+
+    private static func loadDaily() -> DailyRhythm {
+        guard let data = UserDefaults.standard.data(forKey: dailyKey),
+              let saved = try? JSONDecoder().decode(DailyRhythm.self, from: data) else {
+            return DailyRhythm(day: DailyRhythm.dayKey(Date()), seconds: 0, beats: 0)
+        }
+        return saved
+    }
+
+    /// 모아 둔 춤 시간을 오늘 기록에 더한다. 날짜가 바뀌었으면 새로 센다.
+    private func flushDaily(save: Bool) {
+        let next = today.adding(seconds: pendingSeconds, beats: pendingBeats, on: Date())
+        pendingSeconds = 0
+        pendingBeats = 0
+        if next != today { today = next }
+        guard save else { return }
+        lastDailySave = ProcessInfo.processInfo.systemUptime
+        if let data = try? JSONEncoder().encode(today) {
+            UserDefaults.standard.set(data, forKey: Self.dailyKey)
+        }
     }
 
     private func pollAccess() {

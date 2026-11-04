@@ -102,3 +102,33 @@ enum Animation {
         Int(date.timeIntervalSinceReferenceDate / frameInterval) % ClawdPixels.frameCount
     }
 }
+
+/// 오늘 Clawd 와 함께 춤춘 시간과 박 수. 날짜가 바뀌면 새로 센다. 숫자만 남긴다.
+struct DailyRhythm: Codable, Equatable {
+    var day: String
+    var seconds: Double
+    var beats: Int
+
+    static func dayKey(_ date: Date, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    /// 오늘 몫을 더한다. 날짜가 바뀌었으면 어제 몫은 버리고 새로 시작한다.
+    func adding(seconds extra: Double, beats more: Int, on date: Date, calendar: Calendar = .current) -> DailyRhythm {
+        let today = Self.dayKey(date, calendar: calendar)
+        let base = day == today ? self : DailyRhythm(day: today, seconds: 0, beats: 0)
+        return DailyRhythm(day: today, seconds: base.seconds + max(0, extra), beats: base.beats + max(0, more))
+    }
+
+    /// 팝오버에 쓰는 한 줄. 1분이 안 되면 nil.
+    func summary(on date: Date, calendar: Calendar = .current) -> String? {
+        guard day == Self.dayKey(date, calendar: calendar), seconds >= 60 else { return nil }
+        let minutes = Int(seconds / 60)
+        let time = minutes >= 60 ? "\(minutes / 60)시간 \(minutes % 60)분" : "\(minutes)분"
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        let count = formatter.string(from: NSNumber(value: beats)) ?? "\(beats)"
+        return "오늘 Clawd 와 \(time) 동안 \(count)박을 탔어요"
+    }
+}

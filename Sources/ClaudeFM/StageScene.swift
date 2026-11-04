@@ -27,6 +27,8 @@ struct StageInput {
     var live = false
     /// 관객 환호(0...1). 폭죽이 터지거나 무대를 누르면 다 같이 뛴다.
     var cheer = 0.0
+    /// 전광판 위에 제목·곡 기록 글자가 뜨는 중(0...1). 전광판을 어둡게 눌러 글자가 읽히게 한다.
+    var splash = 0.0
 }
 
 /// 무대에서 터진 폭죽과 그 나이.
@@ -223,8 +225,16 @@ enum StageScene {
         let r = Double(layout.height) * 0.07
         let cx = Double(layout.width) * 0.14, cy = Double(layout.height) * 0.17
         canvas.halo(cx, cy, r * 2.6, RGBColor(0xFFE9A8), 0.35 * level)
-        canvas.disc(cx, cy, r, RGBColor(0xFFE7A0), level)
-        canvas.disc(cx + r * 0.45, cy - r * 0.2, r * 0.88, sky.top.mixed(with: sky.bottom, 0.15), level)
+        // 큰 원 안에서 비켜 놓은 원을 뺀 칸만 칠해 초승달을 만든다. 하늘은 그대로 비친다.
+        let bx = cx + r * 0.45, by = cy - r * 0.2, br = r * 0.88
+        for y in Int(cy - r - 1)...Int(cy + r + 1) {
+            for x in Int(cx - r - 1)...Int(cx + r + 1) {
+                let px = Double(x) + 0.5, py = Double(y) + 0.5
+                let inMoon = (px - cx) * (px - cx) + (py - cy) * (py - cy) <= r * r
+                let inBite = (px - bx) * (px - bx) + (py - by) * (py - by) <= br * br
+                if inMoon, !inBite { canvas.plot(x, y, RGBColor(0xFFE7A0), level) }
+            }
+        }
     }
 
     private static func drawSun(_ canvas: RasterCanvas, _ layout: StageLayout, level: Double, time: Double) {
@@ -344,9 +354,10 @@ enum StageScene {
         let levels = input.spectrum.count == SpectrumMeter.bandCount ? input.spectrum : Array(repeating: 0, count: SpectrumMeter.bandCount)
         let strobe = input.live ? input.hookLevel * hop * 0.25 : 0
         // 반응 그림을 전광판 가운데 크게 띄운다.
-        let glyph = input.reaction.map(PixelGlyph.reaction)
-        let glyphScale = max(1, min((rows - 2) / 5, (columns - 2) / 5))
-        let glyphCols = 5 * glyphScale, glyphRows = 5 * glyphScale
+        let glyph = input.reaction.map(PixelGlyph.large)
+        let glyphW = glyph?.width ?? 9, glyphH = glyph?.height ?? 9
+        let glyphScale = max(1, min((rows - 2) / glyphH, (columns - 2) / glyphW))
+        let glyphCols = glyphW * glyphScale, glyphRows = glyphH * glyphScale
         let glyphLeft = (columns - glyphCols) / 2, glyphTop = (rows - glyphRows) / 2
         var glyphMask: [Int: RGBColor] = [:]
         if let glyph, input.reactionLevel > 0.05 {
@@ -361,7 +372,7 @@ enum StageScene {
             }
         }
         let glyphShown = !glyphMask.isEmpty
-        let barDim = glyphShown ? 1 - 0.6 * input.reactionLevel : 1
+        let barDim = (glyphShown ? 1 - 0.6 * input.reactionLevel : 1) * (1 - 0.75 * input.splash)
         let idleWord = "CLAUDE FM"
         var idleMask = Set<Int>()
         if !input.live {
@@ -405,7 +416,7 @@ enum StageScene {
                 }
                 if let glyphColor = glyphMask[row * columns + column] {
                     color = glyphColor.mixed(with: .white, hop * 0.25)
-                    alpha = input.reactionLevel * (0.8 + 0.2 * hop)
+                    alpha = input.reactionLevel * (0.8 + 0.2 * hop) * (1 - 0.75 * input.splash)
                 }
                 if idleMask.contains(row * columns + column) {
                     color = RGBColor.coral
@@ -424,10 +435,18 @@ enum StageScene {
         canvas.span(x - 2, x + w + 1, y + h + 1, palette.primary, rim * 0.6)
     }
 
+    /// 전광판을 가리지 않도록 양옆에 하나씩 매단다.
     private static func drawMirrorball(_ canvas: RasterCanvas, _ layout: StageLayout, time: Double, hop: Double) {
-        let cx = Double(layout.centerX), r = max(4, Double(layout.height) * 0.035)
-        let cy = Double(layout.trussY) + 4 + r
-        for y in layout.trussY + 2..<Int(cy - r) { canvas.plot(layout.centerX, y, RGBColor(0x8A8FA0), 0.8) }
+        let gap = max(8, layout.width / 22)
+        for (index, x) in [layout.screenX - gap, layout.screenX + layout.screenW + gap - 1].enumerated() {
+            drawMirrorball(canvas, layout, x: x, time: time + Double(index) * 1.7, hop: hop, seed: index)
+        }
+    }
+
+    private static func drawMirrorball(_ canvas: RasterCanvas, _ layout: StageLayout, x centerX: Int, time: Double, hop: Double, seed: Int) {
+        let cx = Double(centerX) + 0.5, r = max(3.5, Double(layout.height) * 0.03)
+        let cy = Double(layout.trussY) + 8 + r
+        for y in layout.trussY + 2..<Int(cy - r) { canvas.plot(centerX, y, RGBColor(0x8A8FA0), 0.8) }
         let y0 = Int(cy - r), y1 = Int(cy + r)
         for y in y0...y1 {
             for x in Int(cx - r)...Int(cx + r) {
@@ -440,9 +459,9 @@ enum StageScene {
         }
         canvas.halo(cx, cy, r * 2.2, RGBColor(0xDDE6FF), 0.25 + hop * 0.2)
         // 미러볼이 흩뿌리는 빛 조각
-        for index in 0..<26 {
+        for index in 0..<16 {
             let angle = time * 0.5 + Double(index) * 2.399
-            let distance = (0.18 + PixelNoise.unit(index, 51) * 0.62) * Double(layout.width) * 0.5
+            let distance = (0.12 + PixelNoise.unit(index + seed * 31, 51) * 0.6) * Double(layout.width) * 0.45
             let x = Int(cx + cos(angle) * distance)
             let y = Int(cy + 6 + abs(sin(angle * 1.3)) * distance * 0.55)
             let color = ClawdPixels.discoColors[index % ClawdPixels.discoColors.count]

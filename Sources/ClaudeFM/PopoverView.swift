@@ -75,6 +75,13 @@ struct PopoverView: View {
                     .font(.system(size: 12))
             }
 
+            if let today = rhythm.today.summary(on: Date()) {
+                Label(today, systemImage: "figure.socialdance")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
             Divider()
 
             HStack(spacing: 12) {

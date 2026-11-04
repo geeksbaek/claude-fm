@@ -204,9 +204,28 @@ func runSurge(breakdown: Bool) -> Int {
 check(runSurge(breakdown: true) == 1, "드롭을 한 번 센다 \(runSurge(breakdown: true))")
 check(runSurge(breakdown: false) == 0, "고른 곡에서는 드롭이 없다 \(runSurge(breakdown: false))")
 
+// MARK: - 오늘의 리듬
+
+var utc = Calendar(identifier: .gregorian)
+utc.timeZone = TimeZone(identifier: "UTC")!
+let morning = Date(timeIntervalSince1970: 1_793_000_000)
+var daily = DailyRhythm(day: "", seconds: 0, beats: 0)
+daily = daily.adding(seconds: 30, beats: 60, on: morning, calendar: utc)
+check(daily.summary(on: morning, calendar: utc) == nil, "1분이 안 되면 숨긴다")
+daily = daily.adding(seconds: 4_300, beats: 8_180, on: morning, calendar: utc)
+check(daily.summary(on: morning, calendar: utc) == "오늘 Clawd 와 1시간 12분 동안 8,240박을 탔어요",
+      "오늘의 리듬 \(daily.summary(on: morning, calendar: utc) ?? "nil")")
+let tomorrow = morning.addingTimeInterval(86_400)
+check(daily.summary(on: tomorrow, calendar: utc) == nil, "날짜가 바뀌면 어제 기록은 보이지 않는다")
+let fresh = daily.adding(seconds: 90, beats: 120, on: tomorrow, calendar: utc)
+check(fresh.beats == 120 && fresh.seconds == 90, "날짜가 바뀌면 새로 센다")
+
 // MARK: - 픽셀 그림·폭죽·전광판
 
 for reaction in LyricReaction.allCases {
+    let large = PixelGlyph.large(reaction)
+    check(large.rows.allSatisfy { $0.count == large.width } && large.height >= 8 && large.width >= 7,
+          "\(reaction) 큰 그림의 줄 길이가 같다")
     let glyph = PixelGlyph.reaction(reaction)
     check(glyph.width == 5 && glyph.height == 5 && glyph.rows.allSatisfy { $0.count == 5 }, "\(reaction) 그림은 5×5")
     check(glyph.pixels.count >= 9, "\(reaction) 그림이 비지 않았다")

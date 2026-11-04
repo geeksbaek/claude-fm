@@ -134,6 +134,7 @@ final class StageView: NSView {
     private var cheerUntil: TimeInterval = -10
     private var shakeStartedAt: TimeInterval = -10
     private var shakeStrength = 0.0
+    private var splashLevel = 0.0
     private var trackingArea: NSTrackingArea?
     var onTogglePlayback: (() -> Void)?
     var onNudgeSync: ((Double) -> Void)?
@@ -314,6 +315,9 @@ final class StageView: NSView {
         input.hour = Calendar.current.component(.hour, from: Date())
         input.live = live
         input.cheer = cheerUntil > now ? min(1, (cheerUntil - now) / 0.6) : 0
+        let splashing = cue.map { $0.isTitle || $0.recap != nil } ?? false
+        splashLevel = splashing ? min(1, splashLevel + dt / 0.35) : max(0, splashLevel - dt / 0.5)
+        input.splash = splashLevel
         StageScene.render(input, into: canvas)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -555,7 +559,7 @@ final class StageHUDView: NSView {
         let subFont = NSFont.systemFont(ofSize: 12.5 * unit, weight: .medium)
         let shadow = textShadow(blur: 6 * unit)
         var y = margin + 14 * unit
-        if !state.title.isEmpty {
+        if !state.title.isEmpty, state.cue?.isTitle != true {
             var x = margin
             if state.live {
                 let badge = drawPill("LIVE", at: NSPoint(x: x, y: y), font: NSFont.systemFont(ofSize: 10.5 * unit, weight: .heavy),
@@ -633,13 +637,13 @@ final class StageHUDView: NSView {
         if let cue = state.cue, let recap = cue.recap {
             let appear = min(1, state.cueAge / 0.5)
             let font = NSFont.systemFont(ofSize: 46 * unit, weight: .heavy)
-            let glyph = PixelGlyph.reaction(recap.reaction)
+            let glyph = PixelGlyph.large(recap.reaction)
             let textWidth = (recap.headline as NSString).size(withAttributes: [.font: font]).width
-            let pixel = (7 * unit).rounded()
-            let glyphX = (bounds.width - textWidth) / 2 - pixel * 5 - 18 * unit
-            drawGlyph(glyph, x: glyphX, y: centerY - pixel * 2.5 - state.hop * 6 * unit, pixel: pixel, alpha: appear)
-            drawGlyph(glyph, x: (bounds.width + textWidth) / 2 + 18 * unit, y: centerY - pixel * 2.5 - state.hop * 6 * unit,
-                      pixel: pixel, alpha: appear)
+            let pixel = (4.5 * unit).rounded()
+            let glyphW = CGFloat(glyph.width) * pixel, glyphH = CGFloat(glyph.height) * pixel
+            let glyphY = centerY - glyphH / 2 - state.hop * 6 * unit
+            drawGlyph(glyph, x: (bounds.width - textWidth) / 2 - glyphW - 20 * unit, y: glyphY, pixel: pixel, alpha: appear)
+            drawGlyph(glyph, x: (bounds.width + textWidth) / 2 + 20 * unit, y: glyphY, pixel: pixel, alpha: appear)
             drawCentered(recap.headline, y: centerY - font.pointSize * 0.62, font: font, color: NSColor.white.withAlphaComponent(appear))
             drawCentered(recap.caption, y: centerY + font.pointSize * 0.62, font: NSFont.systemFont(ofSize: 16 * unit, weight: .semibold),
                          color: NSColor.white.withAlphaComponent(0.7 * appear))

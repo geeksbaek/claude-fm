@@ -125,6 +125,112 @@ struct PixelGlyph: Equatable {
     }
 }
 
+extension PixelGlyph {
+    /// 전광판과 무대 글자 층에 쓰는 9칸짜리 큰 그림. 색은 작은 그림과 같다.
+    static func large(_ reaction: LyricReaction) -> PixelGlyph {
+        let small = PixelGlyph.reaction(reaction)
+        let rows: [String]
+        switch reaction {
+        case .love:
+            rows = [
+                ".NN...NN.",
+                "NNNN.NNNN",
+                "NcNNNNNNN",
+                "NccNNNNNN",
+                ".NNNNNNN.",
+                "..NNNNN..",
+                "...NNN...",
+                "....N....",
+            ]
+        case .star:
+            rows = [
+                "....N....",
+                "...NNN...",
+                "...NcN...",
+                "NNNNcNNNN",
+                ".NNNNNNN.",
+                "..NNNNN..",
+                "..NNNNN..",
+                ".NNN.NNN.",
+                ".N.....N.",
+            ]
+        case .fire:
+            rows = [
+                "....N....",
+                "...NN....",
+                "...NNN.N.",
+                "..NNcNNN.",
+                ".NNcccNN.",
+                ".NcccccNN",
+                "NNcccccNN",
+                "NNNcccNNN",
+                ".NNNNNNN.",
+            ]
+        case .tears:
+            rows = [
+                "...N...",
+                "..NNN..",
+                "..NNN..",
+                ".NNNNN.",
+                "NNNNNNN",
+                "NcNNNNN",
+                "NcNNNNN",
+                ".NNNNN.",
+                "..NNN..",
+            ]
+        case .moon:
+            rows = [
+                "...NNNN.",
+                ".NNNN...",
+                ".NNN....",
+                "NNN.....",
+                "NNN...c.",
+                "NNN.....",
+                ".NNN....",
+                ".NNNN...",
+                "...NNNN.",
+            ]
+        case .flower:
+            rows = [
+                "...NNN...",
+                "..NNNNN..",
+                "...NNN...",
+                "NN.ccc.NN",
+                "NNNcccNNN",
+                "NN.ccc.NN",
+                "...NNN...",
+                "..NNNNN..",
+                "...NNN...",
+            ]
+        case .sun:
+            rows = [
+                "N...N...N",
+                ".N..N..N.",
+                "..NNNNN..",
+                "..NcccN..",
+                "NNNcccNNN",
+                "..NcccN..",
+                "..NNNNN..",
+                ".N..N..N.",
+                "N...N...N",
+            ]
+        case .snow:
+            rows = [
+                "....N....",
+                ".N..N..N.",
+                "..N.N.N..",
+                "...NNN...",
+                "NNNNcNNNN",
+                "...NNN...",
+                "..N.N.N..",
+                ".N..N..N.",
+                "....N....",
+            ]
+        }
+        return PixelGlyph(rows: rows, color: small.color, accent: small.accent)
+    }
+}
+
 /// 분위기마다 무대와 폭죽이 쓰는 색 묶음.
 struct MoodPalette: Equatable {
     var primary: RGBColor
