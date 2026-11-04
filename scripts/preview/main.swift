@@ -349,3 +349,120 @@ MainActor.assumeIsolated {
         write(renderStage(input, hud: hud), "stage-\(item.name).png")
     }
 }
+
+// MARK: - README 대표 그림
+
+/// 메뉴바 한 줄에 Clawd 가 있고, 그 아래로 말풍선이 뜬 모습.
+@MainActor
+func menuBarScene(appearance: NSAppearance, cue: LyricCue, elapsed: Double?, accent: SpriteAccent,
+                  pose: DancePose, feeling: VocalFeeling) -> NSBitmapImageRep {
+    let scale: CGFloat = 2
+    let size = NSSize(width: 520, height: 150)
+    let barHeight: CGFloat = 26
+    let iconX: CGFloat = 330
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    NSGraphicsContext.saveGraphicsState()
+    let context = NSGraphicsContext(bitmapImageRep: rep)!
+    NSGraphicsContext.current = context
+    let cg = context.cgContext
+    cg.scaleBy(x: scale, y: scale)
+    cg.translateBy(x: 0, y: size.height)
+    cg.scaleBy(x: 1, y: -1)
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: true)
+    appearance.performAsCurrentDrawingAppearance {
+        // 바탕 화면과 메뉴바
+        let desk = isDark ? NSColor(srgbRed: 0.13, green: 0.15, blue: 0.22, alpha: 1) : NSColor(srgbRed: 0.72, green: 0.80, blue: 0.90, alpha: 1)
+        desk.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        (isDark ? NSColor(white: 0.12, alpha: 0.92) : NSColor(white: 0.97, alpha: 0.9)).setFill()
+        NSRect(x: 0, y: 0, width: size.width, height: barHeight).fill()
+        let ink = isDark ? NSColor.white : NSColor.black
+        // 다른 메뉴바 아이콘 자리는 둥근 칸으로만, 오른쪽 끝에는 시계를 둔다.
+        let clock = "오후 10:30" as NSString
+        let clockAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .medium),
+                                                         .foregroundColor: ink.withAlphaComponent(0.85)]
+        let clockWidth = clock.size(withAttributes: clockAttrs).width
+        clock.draw(at: NSPoint(x: size.width - 14 - clockWidth, y: 5), withAttributes: clockAttrs)
+        var slot = size.width - 14 - clockWidth - 30
+        for _ in 0..<3 {
+            ink.withAlphaComponent(0.35).setFill()
+            NSBezierPath(roundedRect: NSRect(x: slot, y: 8, width: 14, height: 10), xRadius: 3, yRadius: 3).fill()
+            slot -= 28
+        }
+        ClawdSprite.draw(frame: 3, playing: false, dance: pose, scale: 1, origin: CGPoint(x: iconX - 12, y: 6),
+                         noteColor: ink, accent: accent)
+        // 말풍선
+        let view = BubbleView()
+        let layout = BubbleView.layout(for: cue)
+        view.frame = NSRect(origin: .zero, size: layout.size)
+        view.frozenTime = freeze
+        view.noteTime = freeze
+        view.cueShownAt = freeze - 2
+        var mixed = feeling
+        mixed.phase = freeze
+        view.feeling = BubbleView.combinedFeeling(for: cue.current, audio: mixed)
+        view.cue = cue
+        view.isInterlude = cue.isInterlude
+        view.isHumming = cue.isHumming
+        view.text = layout.current
+        view.nextText = layout.next
+        view.tailX = layout.size.width / 2
+        if let elapsed { view.clock = PlaybackClock(elapsed: elapsed, uptime: freeze, rate: 1) }
+        view.appearance = appearance
+        cg.saveGState()
+        cg.translateBy(x: (iconX - layout.size.width / 2).rounded(), y: barHeight - 2)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.25)
+        shadow.shadowBlurRadius = 8
+        shadow.shadowOffset = NSSize(width: 0, height: -2)
+        shadow.set()
+        view.draw(view.bounds)
+        cg.restoreGState()
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+
+/// 반응 그림 여덟 가지를 한 줄로.
+func reactionStrip() -> NSBitmapImageRep {
+    let scale: CGFloat = 6, gap: CGFloat = 10
+    let cell = NSSize(width: ClawdSprite.canvas.width * scale, height: ClawdSprite.canvas.height * scale)
+    let reactions = LyricReaction.allCases
+    let size = NSSize(width: CGFloat(reactions.count) * (cell.width + gap) + gap, height: cell.height + gap * 2)
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height),
+                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                               colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    let context = NSGraphicsContext(bitmapImageRep: rep)!
+    context.imageInterpolation = .none
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context.cgContext, flipped: true)
+    context.cgContext.translateBy(x: 0, y: size.height)
+    context.cgContext.scaleBy(x: 1, y: -1)
+    NSColor(srgbRed: 0.98, green: 0.96, blue: 0.92, alpha: 1).setFill()
+    NSRect(origin: .zero, size: size).fill()
+    for (index, reaction) in reactions.enumerated() {
+        let pose = DancePose(active: true, hop: index % 2 == 0 ? 1 : 0.3, stepRight: index % 2 == 1, mood: .groove,
+                             style: index % 3 == 0 ? .handsUp : .bounce, danceTime: 1)
+        let origin = CGPoint(x: gap + CGFloat(index) * (cell.width + gap), y: gap)
+        ClawdSprite.draw(frame: 2 + index, playing: false, dance: pose, scale: scale, origin: origin,
+                         noteColor: NSColor(srgbRed: 0.16, green: 0.15, blue: 0.13, alpha: 1),
+                         accent: SpriteAccent(reaction: reaction, hook: false))
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+
+MainActor.assumeIsolated {
+    let cue = line("너를 처음 만난 그 날처럼", next: "별빛이 내린 밤", start: 10, end: 13, reaction: .love)
+    let pose = DancePose(active: true, hop: 1, stepRight: false, mood: .groove, style: .bounce, danceTime: 2)
+    var feeling = VocalFeeling.calm
+    feeling.wave = 0.4
+    feeling.beat = 0.5
+    let accent = SpriteAccent(reaction: .love, hook: false)
+    write(menuBarScene(appearance: light, cue: cue, elapsed: 11.3, accent: accent, pose: pose, feeling: feeling), "hero-light.png")
+    write(menuBarScene(appearance: dark, cue: cue, elapsed: 11.3, accent: accent, pose: pose, feeling: feeling), "hero-dark.png")
+}
+write(reactionStrip(), "reactions.png")

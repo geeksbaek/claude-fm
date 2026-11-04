@@ -375,10 +375,10 @@ enum StageScene {
         }
         let glyphShown = !glyphMask.isEmpty
         let barDim = (glyphShown ? 1 - 0.6 * input.reactionLevel : 1) * (1 - 0.75 * input.splash)
-        let idleWord = "CLAUDE FM"
+        // 쉬는 동안에는 전광판 칸으로 이름을 쓴다. 칸이 모자라면 짧게 쓴다.
+        let idleWord = RasterCanvas.textWidth("CLAUDE FM") <= columns - 2 ? "CLAUDE FM" : "FM"
         var idleMask = Set<Int>()
-        if !input.live {
-            // 쉬는 동안에는 전광판 칸으로 이름을 쓴다.
+        if !input.live, RasterCanvas.textWidth(idleWord) <= columns, rows >= 5 {
             let textCols = RasterCanvas.textWidth(idleWord)
             let left = (columns - textCols) / 2, top = (rows - 5) / 2
             var cursor = left

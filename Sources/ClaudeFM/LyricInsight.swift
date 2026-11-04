@@ -90,9 +90,9 @@ enum LyricReactionFinder {
     // 영어는 낱말 경계로 자르고, 일본어·중국어는 글자로 찾는다.
     private static let rules: [Rule] = [
         rule(.snow, #"눈이\s?(?:내|와|오)|눈송이|첫눈|함박눈|눈꽃|눈사람|겨울|\b(?:snow\w*|winter|frozen|freez\w*)\b|雪|冬|ゆき"#),
-        rule(.fire, #"불꽃|불타|불길|불처럼|불이\s?붙|불을\s?붙|불태|타오르|타올라|뜨거|열정|\b(?:fire|fires|burn\w*|flames?|blaz\w*|ignite\w*|lit|hot|heat)\b|花火|火|炎|燃|熱|烧|ファイア"#),
-        rule(.love, #"사랑|좋아해|좋아했|하트|심장|두근|설레|키스|입맞|\b(?:lov(?:e|es|ed|ing|er|ers|ely)|heart\w*|kiss\w*|darling|sweetheart)\b|愛|爱|恋|好き|すき|スキ|ハート|キス|(?<!ク)ラブ|ドキドキ|どきどき|喜欢|心"#),
-        rule(.star, #"(?<![이특개차구분])별(?:빛|들|자리|처럼|이|을|만|과|에|의|님|똥)|샛별|반짝|은하|빛나|\b(?:\w*star(?:s|light|dust|ry)?|shin(?:e|es|ing)|sparkl\w*|twinkl\w*|glitter\w*|galax\w*)\b|星|輝|煌|キラキラ|きらきら|スター|闪|耀"#),
+        rule(.fire, #"불꽃|불타|불길|불처럼|불이\s?붙|불을\s?붙|불태|타오르|타올라|뜨거|열정|\b(?:fire|fires|firework\w*|burn\w*|flames?|blaz\w*|ignite\w*|lit|hot|heat)\b|花火|火|炎|燃|熱|烧|ファイア"#),
+        rule(.love, #"사랑|좋아해|좋아했|하트|심장|두근|설레|키스|입맞|\b(?:lov(?:e|es|ed|ing|er|ers|ely)|heart\w*|kiss\w*|darling|sweetheart)\b|愛|爱|恋|好き|すき|スキ|ハート|キス|(?<!ク)ラブ|ドキドキ|どきどき|喜欢|心动|心跳|真心|恋心|心臓|我的心|你的心"#),
+        rule(.star, #"(?<![이특개차구분작결송성식])별(?:빛|들|자리|처럼|이|을|만|과|에|의|님|똥)|샛별|반짝|은하|빛나|\b(?:\w*star(?:s|light|dust|ry)?|shin(?:e|es|ing)|sparkl\w*|twinkl\w*|glitter\w*|galax\w*)\b|星|輝|煌|キラキラ|きらきら|スター|闪|耀"#),
         rule(.tears, #"눈물|울어|울고|울지|울었|울음|비가|빗물|빗소리|빗속|빗방울|비\s?내리|비처럼|소나기|장마|\b(?:tears?|cry|cries|crying|cried|rain(?:s|y|ing|ed|drops?)?|weep\w*)\b|涙|泣|雨|なみだ|泪|哭"#),
         rule(.moon, #"달빛|달님|보름달|초승달|반달|달이\s?뜨|달\s?아래|달처럼|밤하늘|한밤|\b(?:moon\w*|midnight)\b|(?<!岁|歲)月|夜空|真夜中|ムーン|午夜"#),
         rule(.flower, #"(?<!불|눈)꽃|장미|피어나|\b(?:flowers?|bloom\w*|blossom\w*|roses?|petals?|daisy|daisies)\b|花|咲|桜|さくら|サクラ|薔薇|バラ|玫瑰|樱"#),
