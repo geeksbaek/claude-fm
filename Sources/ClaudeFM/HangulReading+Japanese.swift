@@ -219,6 +219,8 @@ extension HangulReading {
         if isJapaneseTeForm(words, at: index - 1), japaneseTeAuxiliaries.contains(core) { return true }
         if previous.raw == "で", ["い", "し", "き", "み"].contains(core) { return false }
         if core == "そう", isJapaneseVerbStem(previous) { return true }
+        // どうしよう·どうすれば 는 한 말로 부른다
+        if previous.raw == "どう", let first = core.first, "しすさせ".contains(first) { return true }
         return word.raw.count == 1 || ["て", "で", "た", "だ"].contains(core)
     }
 
