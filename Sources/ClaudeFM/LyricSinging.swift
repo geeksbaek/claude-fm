@@ -297,10 +297,19 @@ final class LyricSinging: ObservableObject {
                 currentTrack.elapsed = prevElapsed
             }
         }
-        // 곡이 끝까지 흐른 뒤 다음 곡으로 넘어가거나 멈추면 앵콜 박수를 친다. 끝나기 전에 멈추거나 넘기면 치지 않는다.
+        // 같은 곡이 처음으로 돌아갔는지(한 곡 반복, 처음으로 되감기).
+        let restarted = key == trackKey && abs(currentTrack.rate) > 0.05 && currentTrack.elapsed < 5
+            && (snapshot.map { $0.elapsed(at: now) > 20 } ?? false)
+        // 곡이 끝까지 흐른 뒤 다음 곡으로 넘어가거나, 멈추거나, 처음부터 다시 시작하면 앵콜 박수를 친다.
+        // 끝나기 전에 멈추거나 넘기면 치지 않는다.
         if let previousKey = trackKey, now >= pauseGraceUntil, finishedNaturally(snapshot, at: now),
-           key != previousKey || abs(currentTrack.rate) <= 0.05 {
-            applaud(previousKey, nextStarted: key != previousKey && abs(currentTrack.rate) > 0.05)
+           key != previousKey || abs(currentTrack.rate) <= 0.05 || restarted {
+            applaud(previousKey, nextStarted: (key != previousKey || restarted) && abs(currentTrack.rate) > 0.05)
+        }
+        if restarted {
+            // 다시 듣는 곡도 후렴 폭죽과 앵콜 박수를 다시 셀 수 있게 한다.
+            applaudedKey = nil
+            lastHookStart = nil
         }
         snapshot = Snapshot(currentTrack, at: now)
         setNowPlaying(title: currentTrack.title, artist: currentTrack.artist)
