@@ -109,7 +109,8 @@ extension HangulReading {
         "日本中": "nihonjuu", "一晩中": "hitobanjuu", "一年中": "ichinenjuu", "体中": "karadajuu",
         "誕生日": "tanjoubi", "日本一": "nihon'ichi", "世界一": "sekaiichi", "一期一会": "ichigoichie",
         "春夏秋冬": "shunkashuutou", "喜怒哀楽": "kidoairaku", "花鳥風月": "kachoufuugetsu", "蜃気楼": "shinkirou",
-        "金木犀": "kinmokusei", "千本桜": "senbonzakura",
+        "金木犀": "kinmokusei", "千本桜": "senbonzakura", "雪景色": "yukigeshiki",
+        "いつの間にか": "itsunomanika", "いつの間に": "itsunomani",
         "月曜日": "getsuyoubi", "火曜日": "kayoubi", "水曜日": "suiyoubi", "木曜日": "mokuyoubi",
         "金曜日": "kin'youbi", "土曜日": "doyoubi", "日曜日": "nichiyoubi",
     ]

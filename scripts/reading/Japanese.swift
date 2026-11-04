@@ -1,6 +1,4 @@
 // 일본어 읽기 예문. `japanese: true` 는 가나가 있는 곡 안의 줄이다.
-import Foundation
-
 // 예문은 macOS 낱말 나누기·병음에 기대므로 macOS 에서만 견준다.
 // 리눅스에서는 macOS 기록을 다시 쓰는 대역(-D READING_REPLAY)과 함께일 때만 넣는다.
 #if os(macOS) || READING_REPLAY
@@ -1052,109 +1050,108 @@ let japaneseCases: [ReadingCase] = [
     ReadingCase("今日という日を忘れない", "쿄토 이우 히오 와스레나이", japanese: true),
     ReadingCase("大丈夫だよきっと", "다이조부다요 킷토", japanese: true),
     ReadingCase("ここにいるよ", "코코니 이루요", japanese: true),
-
+    ReadingCase("君に出会うまでは知らなかった", "키미니 데아우마데와 시라나캇타", japanese: true),
+    ReadingCase("僕にはできないことばかり", "보쿠니와 데키나이 코토바카리", japanese: true),
+    ReadingCase("君とならどこへでも行ける", "키미토나라 도코에데모 이케루", japanese: true),
+    ReadingCase("夢を見るのはもうやめた", "유메오 미루노와 모 야메타", japanese: true),
+    ReadingCase("心にもないことを言った", "코코로니모 나이 코토오 잇타", japanese: true),
+    ReadingCase("誰にも渡したくない", "다레니모 와타시타쿠나이", japanese: true),
+    ReadingCase("雨に濡れながら歩いた", "아메니 누레나가라 아루이타", japanese: true),
+    ReadingCase("光り輝く未来へ", "히카리카가야쿠 미라이에", japanese: true),
+    ReadingCase("君を想うたびに胸が痛い", "키미오 오모우 타비니 무네가 이타이", japanese: true),
+    ReadingCase("言葉より大切なもの", "코토바요리 타이세츠나 모노", japanese: true),
+    ReadingCase("嘘でもいいから好きと言って", "우소데모 이이카라 스키토 잇테", japanese: true),
+    ReadingCase("好きって言ってよ", "스킷테 잇테요", japanese: true),
+    ReadingCase("夜が明けるまで踊り明かそう", "요루가 아케루마데 오도리아카소", japanese: true),
+    ReadingCase("目を閉じれば君がいる", "메오 토지레바 키미가 이루", japanese: true),
+    ReadingCase("振り返らずに前を向いて", "후리카에라즈니 마에오 무이테", japanese: true),
+    ReadingCase("手を伸ばせば届きそうで", "테오 노바세바 토도키소데", japanese: true),
+    ReadingCase("星になった君へ", "호시니 낫타 키미에", japanese: true),
+    ReadingCase("明日になれば忘れてしまう", "아시타니 나레바 와스레테시마우", japanese: true),
+    ReadingCase("抱きしめたら壊れそう", "다키시메타라 코와레소", japanese: true),
+    ReadingCase("君の名前を何度も呼んだ", "키미노 나마에오 난도모 욘다", japanese: true),
+    ReadingCase("思い出すのは君のことばかり", "오모이다스노와 키미노 코토바카리", japanese: true),
+    ReadingCase("会いたいと思うほど遠くなる", "아이타이토 오모우호도 토쿠 나루", japanese: true),
+    ReadingCase("笑顔の裏に隠した涙", "에가오노 우라니 카쿠시타 나미다", japanese: true),
+    ReadingCase("君が笑うと僕も嬉しい", "키미가 와라우토 보쿠모 우레시이", japanese: true),
+    ReadingCase("ひとりじゃないと気づいたんだ", "히토리자나이토 키즈이탄다", japanese: true),
+    ReadingCase("泣いてもいいんだよ", "나이테모 이인다요", japanese: true),
+    ReadingCase("頑張らなくていいよ", "간바라나쿠테 이이요", japanese: true),
+    ReadingCase("何も怖くない", "나니모 코와쿠나이", japanese: true),
+    ReadingCase("知らない街を歩いてみたい", "시라나이 마치오 아루이테미타이", japanese: true),
+    ReadingCase("幸せになってほしい", "시아와세니 낫테 호시이", japanese: true),
+    ReadingCase("ずっと前から好きでした", "즛토 마에카라 스키데시타", japanese: true),
+    ReadingCase("好きでいさせて", "스키데 이사세테", japanese: true),
+    ReadingCase("花びらが舞う春の日に", "하나비라가 마우 하루노 히니", japanese: true),
+    ReadingCase("夕暮れの帰り道で", "유구레노 카에리미치데", japanese: true),
+    ReadingCase("窓の外は雪景色", "마도노 소토와 유키게시키", japanese: true),
+    ReadingCase("夏の終わりの花火大会", "나츠노 오와리노 하나비 타이카이", japanese: true),
+    ReadingCase("ハンバーガーを食べよう", "한바가오 타베요", japanese: true),
+    ReadingCase("コーヒーを飲みながら", "코히오 노미나가라", japanese: true),
+    ReadingCase("ジャズが流れる夜", "자즈가 나가레루 요루", japanese: true),
+    ReadingCase("ポップコーンとジュース", "폿푸콘토 주스", japanese: true),
+    ReadingCase("ヴィンテージのギター", "빈테지노 기타", japanese: true),
+    ReadingCase("シャンパンで乾杯", "샨판데 칸파이", japanese: true),
+    ReadingCase("サンシャイン", "산샤인", japanese: true),
+    ReadingCase("ムーンライト", "문라이토", japanese: true),
+    ReadingCase("スターライト", "스타 라이토", japanese: true),
+    ReadingCase("ロンリーナイト", "론리 나이토", japanese: true),
+    ReadingCase("フォーリンラブ", "포린 라부", japanese: true),
+    ReadingCase("アイラブユー", "아이 라부 유", japanese: true),
+    ReadingCase("サンキュー", "산큐", japanese: true),
+    ReadingCase("ハローグッバイ", "하로 굿바이", japanese: true),
+    ReadingCase("愛と勇気だけが友達さ", "아이토 유키다케가 토모다치사", japanese: true),
+    ReadingCase("正義の味方", "세이기노 미카타", japanese: true),
+    ReadingCase("秘密の花園", "히미츠노 하나조노", japanese: true),
+    ReadingCase("魔法をかけて", "마호오 카케테", japanese: true),
+    ReadingCase("恋のおまじない", "코이노 오마지나이", japanese: true),
+    ReadingCase("今宵は月が綺麗だ", "코요이와 츠키가 키레이다", japanese: true),
+    ReadingCase("夜空を見上げて", "요조라오 미아게테", japanese: true),
+    ReadingCase("流れ星に願いを", "나가레보시니 네가이오", japanese: true),
+    ReadingCase("天の川を渡って", "아마노가와오 와탓테", japanese: true),
+    ReadingCase("銀河の果てまで", "긴가노 하테마데", japanese: true),
+    ReadingCase("君は君のままでいい", "키미와 키미노 마마데 이이", japanese: true),
+    ReadingCase("僕は僕のままで", "보쿠와 보쿠노 마마데", japanese: true),
+    ReadingCase("変わらないでいて", "카와라나이데이테", japanese: true),
+    ReadingCase("変わっていく街並み", "카왓테이쿠 마치나미", japanese: true),
+    ReadingCase("たったひとつの約束", "탓타 히토츠노 야쿠소쿠", japanese: true),
+    ReadingCase("たった一人の君", "탓타 히토리노 키미", japanese: true),
+    ReadingCase("たった今", "탓타 이마", japanese: true),
+    ReadingCase("ほんの少しだけ", "혼노 스코시다케", japanese: true),
+    ReadingCase("なんでだろう", "난데다로", japanese: true),
+    ReadingCase("どうしよう", "도 시요", japanese: true),
+    ReadingCase("どうすればいいの", "도 스레바 이이노", japanese: true),
+    ReadingCase("どうにかなるさ", "도니카 나루사", japanese: true),
+    ReadingCase("どうせ僕なんか", "도세 보쿠난카", japanese: true),
+    ReadingCase("大好きだったよ", "다이스키닷타요", japanese: true),
+    ReadingCase("好きだった人", "스키닷타 히토", japanese: true),
+    ReadingCase("好きな人がいる", "스키나 히토가 이루", japanese: true),
+    ReadingCase("好きな歌を歌おう", "스키나 우타오 우타오", japanese: true),
+    ReadingCase("もしも僕が鳥ならば", "모시모 보쿠가 토리나라바", japanese: true),
+    ReadingCase("君がいなければ", "키미가 이나케레바", japanese: true),
+    ReadingCase("君がいたら", "키미가 이타라", japanese: true),
+    ReadingCase("君がいるなら", "키미가 이루나라", japanese: true),
+    ReadingCase("見上げた空に", "미아게타 소라니", japanese: true),
+    ReadingCase("振り向けばそこに", "후리무케바 소코니", japanese: true),
+    ReadingCase("気がつけば朝", "키가 츠케바 아사", japanese: true),
+    ReadingCase("いつの間にか", "이츠노마니카", japanese: true),
+    ReadingCase("ありがとうを言いたくて", "아리가토오 이이타쿠테", japanese: true),
+    ReadingCase("ごめんねを言えなくて", "고멘네오 이에나쿠테", japanese: true),
+    ReadingCase("さよならを言うのが怖い", "사요나라오 이우노가 코와이", japanese: true),
+    ReadingCase("二人で過ごした日々", "후타리데 스고시타 히비", japanese: true),
+    ReadingCase("二人の秘密", "후타리노 히미츠", japanese: true),
+    ReadingCase("二人きりの夜", "후타리키리노 요루", japanese: true),
+    ReadingCase("一人きりの部屋", "히토리키리노 헤야", japanese: true),
+    ReadingCase("歌を歌おう", "우타오 우타오", japanese: true),
+    ReadingCase("声を聴かせて", "코에오 키카세테", japanese: true),
+    ReadingCase("耳を澄ませば", "미미오 스마세바", japanese: true),
+    ReadingCase("目を覚まして", "메오 사마시테", japanese: true),
 ]
 #else
 let japaneseCases: [ReadingCase] = []
 #endif
 
-let japaneseProbes: [String] = {
-    #if os(macOS)
-    readingDump(japaneseCorpus)
-    #endif
-    return []
-}()
-
-/// 낱말 나누기를 살펴보는 예문.
-let japaneseCorpus: [String] = [
-    "君に出会うまでは知らなかった", "僕にはできないことばかり", "君とならどこへでも行ける", "夢を見るのはもうやめた", "心にもないことを言った", "誰にも渡したくない",
-    "雨に濡れながら歩いた", "光り輝く未来へ", "君を想うたびに胸が痛い", "言葉より大切なもの", "嘘でもいいから好きと言って", "好きって言ってよ", "夜が明けるまで踊り明かそう",
-    "目を閉じれば君がいる", "振り返らずに前を向いて", "手を伸ばせば届きそうで", "星になった君へ", "明日になれば忘れてしまう", "抱きしめたら壊れそう", "君の名前を何度も呼んだ",
-    "思い出すのは君のことばかり", "会いたいと思うほど遠くなる", "笑顔の裏に隠した涙", "君が笑うと僕も嬉しい", "ひとりじゃないと気づいたんだ", "泣いてもいいんだよ", "頑張らなくていいよ",
-    "何も怖くない", "知らない街を歩いてみたい", "幸せになってほしい", "ずっと前から好きでした", "好きでいさせて", "花びらが舞う春の日に", "夕暮れの帰り道で", "窓の外は雪景色",
-    "夏の終わりの花火大会", "ハンバーガーを食べよう", "コーヒーを飲みながら", "ジャズが流れる夜", "ポップコーンとジュース", "ヴィンテージのギター", "シャンパンで乾杯", "サンシャイン",
-    "ムーンライト", "スターライト", "ロンリーナイト", "フォーリンラブ", "アイラブユー", "サンキュー", "ハローグッバイ", "愛と勇気だけが友達さ", "正義の味方", "秘密の花園",
-    "魔法をかけて", "恋のおまじない", "今宵は月が綺麗だ", "夜空を見上げて", "流れ星に願いを", "天の川を渡って", "銀河の果てまで", "君は君のままでいい", "僕は僕のままで",
-    "変わらないでいて", "変わっていく街並み", "たったひとつの約束", "たった一人の君", "たった今", "ほんの少しだけ", "なんでだろう", "どうしよう", "どうすればいいの",
-    "どうにかなるさ", "どうせ僕なんか", "大好きだったよ", "好きだった人", "好きな人がいる", "好きな歌を歌おう", "もしも僕が鳥ならば", "君がいなければ", "君がいたら",
-    "君がいるなら", "見上げた空に", "振り向けばそこに", "気がつけば朝", "いつの間にか", "ありがとうを言いたくて", "ごめんねを言えなくて", "さよならを言うのが怖い",
-    "二人で過ごした日々", "二人の秘密", "二人きりの夜", "一人きりの部屋", "歌を歌おう", "声を聴かせて", "耳を澄ませば", "目を覚まして",
+/// 운영체제 낱말 나누기에 기대어 아직 어긋나는 줄. 결과만 본다.
+let japaneseProbes: [String] = [
+    "故郷へ帰ろう", "宇宙の果て", "本気で好き", "日本の夏", "未来予想図を描こう",
 ]
-
-#if os(macOS)
-/// CI 기록에서 macOS 낱말 나누기·병음을 그대로 다시 쓰려고 남기는 기록.
-struct ReadingDumpRow: Encodable {
-    var t: String
-    var p: String
-    var n: String
-    var k: [ReadingDumpRun]
-    var z: [ReadingDumpRun]
-    var s: String
-}
-
-struct ReadingDumpRun: Encodable {
-    var run: String
-    var tokens: [[String]]
-}
-
-func readingRuns(_ text: String) -> [String] {
-    var runs: [String] = []
-    var current = ""
-    for char in text {
-        if HangulReading.isKana(char) || HangulReading.isHan(char) {
-            current.append(char)
-        } else if !current.isEmpty {
-            runs.append(current)
-            current = ""
-        }
-    }
-    if !current.isEmpty { runs.append(current) }
-    return runs
-}
-
-func readingDump(_ lines: [String]) {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.withoutEscapingSlashes, .sortedKeys]
-    var chars = Set<Character>()
-    for text in lines {
-        let normalized = HangulReading.normalizeWidth(text)
-        var runs = readingRuns(normalized)
-        for japanese in [true, false] {
-            let expanded = HangulReading.expandNumbers(in: normalized, hanIsJapanese: japanese, preferJapanese: japanese)
-            for run in readingRuns(expanded) where !runs.contains(run) { runs.append(run) }
-        }
-        var japaneseRuns = runs
-        for run in runs {
-            var prepared = run
-            for (target, kana) in HangulReading.japaneseReadingReplacements {
-                prepared = prepared.replacingOccurrences(of: target, with: kana)
-            }
-            if !japaneseRuns.contains(prepared) { japaneseRuns.append(prepared) }
-        }
-        for char in runs.joined() where HangulReading.isHan(char) { chars.insert(char) }
-        let row = ReadingDumpRow(
-            t: text,
-            p: HangulReading.line(text, preferJapanese: true),
-            n: HangulReading.line(text),
-            k: japaneseRuns.map { run in ReadingDumpRun(run: run, tokens: HangulReading.japaneseTokens(run).map { [$0.raw, $0.latin] }) },
-            z: runs.map { run in ReadingDumpRun(run: run, tokens: [HangulReading.mandarinTokens(run)]) },
-            s: normalized.applyingTransform(StringTransform(rawValue: "Hant-Hans"), reverse: false) ?? "-"
-        )
-        if let data = try? encoder.encode(row), let json = String(data: data, encoding: .utf8) {
-            print("@@E " + json)
-        }
-    }
-    var single: [String: [String]] = [:]
-    var singleJa: [String: [[String]]] = [:]
-    for char in chars.sorted() {
-        single[String(char)] = HangulReading.mandarinTokens(String(char))
-        singleJa[String(char)] = HangulReading.japaneseTokens(String(char)).map { [$0.raw, $0.latin] }
-    }
-    if let data = try? encoder.encode(single), let json = String(data: data, encoding: .utf8) {
-        print("@@C " + json)
-    }
-    if let data = try? encoder.encode(singleJa), let json = String(data: data, encoding: .utf8) {
-        print("@@K " + json)
-    }
-}
-#endif
