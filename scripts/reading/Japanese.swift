@@ -1,4 +1,6 @@
 // 일본어 읽기 예문. `japanese: true` 는 가나가 있는 곡 안의 줄이다.
+import Foundation
+
 // 예문은 macOS 낱말 나누기·병음에 기대므로 macOS 에서만 견준다.
 // 리눅스에서는 macOS 기록을 다시 쓰는 대역(-D READING_REPLAY)과 함께일 때만 넣는다.
 #if os(macOS) || READING_REPLAY
@@ -1050,12 +1052,109 @@ let japaneseCases: [ReadingCase] = [
     ReadingCase("今日という日を忘れない", "쿄토 이우 히오 와스레나이", japanese: true),
     ReadingCase("大丈夫だよきっと", "다이조부다요 킷토", japanese: true),
     ReadingCase("ここにいるよ", "코코니 이루요", japanese: true),
+
 ]
 #else
 let japaneseCases: [ReadingCase] = []
 #endif
 
-/// 운영체제 낱말 나누기에 기대어 아직 어긋나는 줄. 결과만 본다.
-let japaneseProbes: [String] = [
-    "故郷へ帰ろう", "宇宙の果て", "本気で好き", "日本の夏", "未来予想図を描こう",
+let japaneseProbes: [String] = {
+    #if os(macOS)
+    readingDump(japaneseCorpus)
+    #endif
+    return []
+}()
+
+/// 낱말 나누기를 살펴보는 예문.
+let japaneseCorpus: [String] = [
+    "君に出会うまでは知らなかった", "僕にはできないことばかり", "君とならどこへでも行ける", "夢を見るのはもうやめた", "心にもないことを言った", "誰にも渡したくない",
+    "雨に濡れながら歩いた", "光り輝く未来へ", "君を想うたびに胸が痛い", "言葉より大切なもの", "嘘でもいいから好きと言って", "好きって言ってよ", "夜が明けるまで踊り明かそう",
+    "目を閉じれば君がいる", "振り返らずに前を向いて", "手を伸ばせば届きそうで", "星になった君へ", "明日になれば忘れてしまう", "抱きしめたら壊れそう", "君の名前を何度も呼んだ",
+    "思い出すのは君のことばかり", "会いたいと思うほど遠くなる", "笑顔の裏に隠した涙", "君が笑うと僕も嬉しい", "ひとりじゃないと気づいたんだ", "泣いてもいいんだよ", "頑張らなくていいよ",
+    "何も怖くない", "知らない街を歩いてみたい", "幸せになってほしい", "ずっと前から好きでした", "好きでいさせて", "花びらが舞う春の日に", "夕暮れの帰り道で", "窓の外は雪景色",
+    "夏の終わりの花火大会", "ハンバーガーを食べよう", "コーヒーを飲みながら", "ジャズが流れる夜", "ポップコーンとジュース", "ヴィンテージのギター", "シャンパンで乾杯", "サンシャイン",
+    "ムーンライト", "スターライト", "ロンリーナイト", "フォーリンラブ", "アイラブユー", "サンキュー", "ハローグッバイ", "愛と勇気だけが友達さ", "正義の味方", "秘密の花園",
+    "魔法をかけて", "恋のおまじない", "今宵は月が綺麗だ", "夜空を見上げて", "流れ星に願いを", "天の川を渡って", "銀河の果てまで", "君は君のままでいい", "僕は僕のままで",
+    "変わらないでいて", "変わっていく街並み", "たったひとつの約束", "たった一人の君", "たった今", "ほんの少しだけ", "なんでだろう", "どうしよう", "どうすればいいの",
+    "どうにかなるさ", "どうせ僕なんか", "大好きだったよ", "好きだった人", "好きな人がいる", "好きな歌を歌おう", "もしも僕が鳥ならば", "君がいなければ", "君がいたら",
+    "君がいるなら", "見上げた空に", "振り向けばそこに", "気がつけば朝", "いつの間にか", "ありがとうを言いたくて", "ごめんねを言えなくて", "さよならを言うのが怖い",
+    "二人で過ごした日々", "二人の秘密", "二人きりの夜", "一人きりの部屋", "歌を歌おう", "声を聴かせて", "耳を澄ませば", "目を覚まして",
 ]
+
+#if os(macOS)
+/// CI 기록에서 macOS 낱말 나누기·병음을 그대로 다시 쓰려고 남기는 기록.
+struct ReadingDumpRow: Encodable {
+    var t: String
+    var p: String
+    var n: String
+    var k: [ReadingDumpRun]
+    var z: [ReadingDumpRun]
+    var s: String
+}
+
+struct ReadingDumpRun: Encodable {
+    var run: String
+    var tokens: [[String]]
+}
+
+func readingRuns(_ text: String) -> [String] {
+    var runs: [String] = []
+    var current = ""
+    for char in text {
+        if HangulReading.isKana(char) || HangulReading.isHan(char) {
+            current.append(char)
+        } else if !current.isEmpty {
+            runs.append(current)
+            current = ""
+        }
+    }
+    if !current.isEmpty { runs.append(current) }
+    return runs
+}
+
+func readingDump(_ lines: [String]) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.withoutEscapingSlashes, .sortedKeys]
+    var chars = Set<Character>()
+    for text in lines {
+        let normalized = HangulReading.normalizeWidth(text)
+        var runs = readingRuns(normalized)
+        for japanese in [true, false] {
+            let expanded = HangulReading.expandNumbers(in: normalized, hanIsJapanese: japanese, preferJapanese: japanese)
+            for run in readingRuns(expanded) where !runs.contains(run) { runs.append(run) }
+        }
+        var japaneseRuns = runs
+        for run in runs {
+            var prepared = run
+            for (target, kana) in HangulReading.japaneseReadingReplacements {
+                prepared = prepared.replacingOccurrences(of: target, with: kana)
+            }
+            if !japaneseRuns.contains(prepared) { japaneseRuns.append(prepared) }
+        }
+        for char in runs.joined() where HangulReading.isHan(char) { chars.insert(char) }
+        let row = ReadingDumpRow(
+            t: text,
+            p: HangulReading.line(text, preferJapanese: true),
+            n: HangulReading.line(text),
+            k: japaneseRuns.map { run in ReadingDumpRun(run: run, tokens: HangulReading.japaneseTokens(run).map { [$0.raw, $0.latin] }) },
+            z: runs.map { run in ReadingDumpRun(run: run, tokens: [HangulReading.mandarinTokens(run)]) },
+            s: normalized.applyingTransform(StringTransform(rawValue: "Hant-Hans"), reverse: false) ?? "-"
+        )
+        if let data = try? encoder.encode(row), let json = String(data: data, encoding: .utf8) {
+            print("@@E " + json)
+        }
+    }
+    var single: [String: [String]] = [:]
+    var singleJa: [String: [[String]]] = [:]
+    for char in chars.sorted() {
+        single[String(char)] = HangulReading.mandarinTokens(String(char))
+        singleJa[String(char)] = HangulReading.japaneseTokens(String(char)).map { [$0.raw, $0.latin] }
+    }
+    if let data = try? encoder.encode(single), let json = String(data: data, encoding: .utf8) {
+        print("@@C " + json)
+    }
+    if let data = try? encoder.encode(singleJa), let json = String(data: data, encoding: .utf8) {
+        print("@@K " + json)
+    }
+}
+#endif
