@@ -106,9 +106,11 @@ enum HangulReading {
         return (0x3040...0x30FF).contains(value) || (0x31F0...0x31FF).contains(value) || (0xFF65...0xFF9F).contains(value)
     }
 
+    /// 한자. 일본어의 々·〆·〇 도 한자와 함께 읽는다.
     static func isHan(_ char: Character) -> Bool {
         guard let value = scalarValue(char) else { return false }
         return (0x4E00...0x9FFF).contains(value) || (0x3400...0x4DBF).contains(value)
+            || (0xF900...0xFAFF).contains(value) || (0x3005...0x3007).contains(value)
     }
 
     static func isLatinLetter(_ char: Character) -> Bool {
@@ -233,6 +235,8 @@ enum HangulReading {
             } else {
                 useJapanese = false
             }
+            // 가나 없는 중국어 줄에서 한자 곁의 숫자는 중국어 숫자로 읽는다.
+            let useChinese = useJapanese && !hanIsJapanese
 
             // 소수점 숫자 (예: 99.9, 3.14 — 단 1.2.3 같은 점 구분은 제외)
             if index + 1 < chars.count, chars[index] == ".", isAsciiDigit(chars[index + 1]) {
@@ -242,7 +246,14 @@ enum HangulReading {
                 if !isMultiDot {
                     let fracDigits = Array(chars[(index + 1)..<fracEnd])
                     index = fracEnd
-                    if useJapanese {
+                    if useChinese {
+                        var zh = chineseNumberWord(digits, before: nil) + "点" + chineseDigits(String(fracDigits))
+                        if index < chars.count, chars[index] == "%" {
+                            zh = "百分之" + zh
+                            index += 1
+                        }
+                        out += zh
+                    } else if useJapanese {
                         var ja = japaneseNumberWord(digits) + "点" + fracDigits.map { japaneseDigitWord($0) }.joined()
                         if index < chars.count, chars[index] == "%" {
                             ja += "パーセント"
@@ -261,7 +272,14 @@ enum HangulReading {
                 }
             }
 
-            if useJapanese {
+            if useChinese {
+                if index < chars.count, chars[index] == "%" {
+                    out += "百分之" + chineseNumberWord(digits, before: nil)
+                    index += 1
+                } else {
+                    out += chineseNumberWord(digits, before: index < chars.count ? chars[index] : nil)
+                }
+            } else if useJapanese {
                 var ja = japaneseNumberWord(digits)
                 if index < chars.count, chars[index] == "%" {
                     ja += "パーセント"
@@ -369,11 +387,10 @@ enum HangulReading {
         }
     }
 
-    /// 가나가 없는 한자는 중국어로 두고, 언어 인식이 일본어일 때만 일본어로 읽는다.
+    /// 가나가 없는 한자 줄은 중국어로 읽고, 일본에서만 쓰는 글자(気·涙·桜·々 …)가 있을 때만 일본어로 읽는다.
+    /// 짧은 한자 줄은 언어 인식이 자주 틀리고, 일본어 곡은 곡 전체의 가나로 이미 일본어로 읽는다.
     static func soundsJapanese(_ text: String) -> Bool {
-        let cjkOnly = String(text.filter { isHan($0) || isKana($0) })
-        let sample = cjkOnly.isEmpty ? text : cjkOnly
-        return recognizesJapanese(sample)
+        text.contains { japaneseOnlyKanji.contains($0) }
     }
 
     static func collapseSpaces(_ text: String) -> String {

@@ -1,7 +1,6 @@
 import Foundation
-import NaturalLanguage
 
-/// 운영체제에 맡기는 읽기: 일본어 낱말 나누기와 로마자 읽기, 중국어 병음, 언어 알아보기.
+/// 운영체제에 맡기는 읽기: 일본어 낱말 나누기와 로마자 읽기, 중국어 병음.
 /// 나머지 규칙은 운영체제와 상관없이 돌아서, 검사 도구는 이 파일 대신 표로 흉내 낸 대역을 넣을 수 있다.
 extension HangulReading {
     /// 일본어 낱말 하나와 그 로마자 읽기.
@@ -30,15 +29,12 @@ extension HangulReading {
     }
 
     /// 중국어 낱말마다 성조 부호가 붙은 병음.
+    /// 번체는 간체 사전에서 낱말로 묶이지 않아 글자마다 끊기고 다음자 소리를 틀리므로(為什麼, 睡覺) 간체로 바꿔 나눈다.
     static func mandarinTokens(_ text: String) -> [String] {
-        transcribe(text, locale: "zh-Hans")
-    }
-
-    /// 가나 없이 한자만 있는 줄이 일본어로 들리는지.
-    static func recognizesJapanese(_ sample: String) -> Bool {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(sample)
-        return recognizer.dominantLanguage == .japanese
+        let simplified = text.applyingTransform(StringTransform(rawValue: "Hant-Hans"), reverse: false)
+            ?? text.applyingTransform(StringTransform(rawValue: "Traditional-Simplified"), reverse: false)
+            ?? text
+        return transcribe(simplified.count == text.count ? simplified : text, locale: "zh-Hans")
     }
 
     private static func substring(_ source: CFString, _ range: CFRange) -> String {
