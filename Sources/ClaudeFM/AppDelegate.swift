@@ -94,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             guard let self else { return }
             self.stage.updateCast(self.caster.badge)
             self.syncStageActive()
+            // 메뉴바 툴팁에도 보내는 상태를 적는다.
+            self.syncAnimation()
         }
         caster.onNotice = { [weak self] line, detail in self?.showCastNotice(line, detail: detail) }
         caster.startSound = { [weak self] ring in self?.rhythm.sendSound(to: ring) ?? .unsupported }
@@ -289,7 +291,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // 다른 앱에서 노래가 흐르면 툴팁에 그 곡을 적는다.
         let tipTitle = singing.performance.map { "♪ \($0.title)" } ?? player.title
         let key = IconKey(at: Date(), playing: player.isPlaying, title: tipTitle, pose: pose, accent: accent,
-                          needsPermission: rhythm.needsPermission)
+                          needsPermission: rhythm.needsPermission, casting: caster.isActive ? caster.menuTitle : nil)
         guard key != lastIcon else { return }
         lastIcon = key
         render(key)
@@ -425,7 +427,9 @@ private struct IconKey: Equatable {
         )
     }
 
-    init(at date: Date, playing: Bool, title: String, pose: DancePose, accent: SpriteAccent, needsPermission: Bool) {
+    /// `casting` 은 TV 로 보내는 중일 때의 상태 글(연결 중 · 거실 TV). 툴팁 둘째 줄에 적는다.
+    init(at date: Date, playing: Bool, title: String, pose: DancePose, accent: SpriteAccent, needsPermission: Bool,
+         casting: String? = nil) {
         self.playing = playing
         note = (playing || pose.showsMotion || accent.reaction != nil) ? Animation.frame(at: date) : 0
         dancing = pose.active
@@ -444,5 +448,6 @@ private struct IconKey: Equatable {
         } else {
             tip = title
         }
+        if let casting { tip += "\n\(casting)" }
     }
 }

@@ -416,8 +416,15 @@ final class StageStreamEncoder: NSObject, AVAssetWriterDelegate, @unchecked Send
         guard writer?.status == .writing else { return fail() }
         pump(until: host)
         guard state == .writing else { return }
-        let index = Int64(((host - startHost) * Double(settings.frameRate)).rounded())
-        guard index > lastFrameIndex, index >= 0 else { return }
+        let rate = Double(settings.frameRate)
+        var index = Int64(((host - startHost) * rate).rounded())
+        if index <= lastFrameIndex {
+            // 타이머가 밀렸다가 몰려 한 칸에 두 장이 오면 뒤 장을 다음 칸으로 민다. 실제 시각보다 한 칸 넘게 앞서지는 않는다.
+            let next = lastFrameIndex + 1
+            guard Double(next) / rate - (host - startHost) < 1 / rate else { return }
+            index = next
+        }
+        guard index >= 0 else { return }
         if !video.isReadyForMoreMediaData {
             guard !settings.realTime, waitUntilReady(video) else {
                 framesDropped += 1
