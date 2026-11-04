@@ -24,6 +24,13 @@ echo "built: $APP"
 
 if [[ "${1:-}" == "--install" ]]; then
   pkill -x ClaudeFM 2>/dev/null || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -x ClaudeFM >/dev/null || break
+    sleep 0.3
+  done
+  if pgrep -x ClaudeFM >/dev/null; then
+    pkill -9 -x ClaudeFM 2>/dev/null || true
+  fi
   rm -rf "/Applications/Claude FM.app"
   cp -R "$APP" /Applications/
   echo "installed: /Applications/Claude FM.app"

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PopoverView: View {
     @ObservedObject var player: RadioPlayer
+    @ObservedObject var rhythm: RhythmDance
+    @ObservedObject var singing: LyricSinging
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -11,9 +13,9 @@ struct PopoverView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
             HStack(spacing: 10) {
-                TimelineView(.periodic(from: .now, by: Animation.frameInterval)) { context in
+                TimelineView(.periodic(from: .now, by: Animation.danceInterval)) { context in
                     Image(nsImage: ClawdSprite.image(frame: Animation.frame(at: context.date),
-                                                     playing: player.isPlaying, scale: 2))
+                                                     playing: player.isPlaying, dance: rhythm.pose(), scale: 2))
                         .id(colorScheme)
                 }
                 .frame(width: ClawdSprite.canvas.width * 2, height: ClawdSprite.canvas.height * 2)
@@ -45,6 +47,39 @@ struct PopoverView: View {
                 Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
             }
 
+            HStack(spacing: 8) {
+                Image(systemName: singing.isBubbleEnabled ? "text.bubble.fill" : "text.bubble")
+                    .foregroundStyle(.secondary)
+                Text("가사 말풍선")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("", isOn: $singing.isBubbleEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: singing.isFeelingEnabled ? "waveform.path.ecg" : "waveform.path")
+                    .foregroundStyle(.secondary)
+                Text("말풍선 파장 필링 효과")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("", isOn: $singing.isFeelingEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(!singing.isBubbleEnabled)
+            }
+
+            if rhythm.needsPermission {
+                Button("시스템 오디오 권한 열기…") { RhythmDance.openSettings() }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 12))
+            }
+
             Divider()
 
             HStack {
@@ -72,11 +107,17 @@ struct PopoverView: View {
         switch player.status {
         case .loading: return "연결 중…"
         case .playing: return "재생 중 · LIVE"
-        case .paused: return "일시정지"
+        case .paused: return pausedText
         case .buffering: return "버퍼링…"
         case .ended: return "방송이 끝났어요"
         case .failed(let message): return message
         }
+    }
+
+    private var pausedText: String {
+        if let caption = rhythm.mood.caption { return caption }
+        if rhythm.needsPermission { return "춤추려면 시스템 오디오 권한이 필요해요" }
+        return "일시정지"
     }
 
     private var statusColor: Color {
@@ -116,6 +157,8 @@ struct VideoView: NSViewRepresentable {
 /// 메뉴바와 팝오버가 같은 박자로 움직이도록 시각에서 프레임을 계산한다.
 enum Animation {
     static let frameInterval: TimeInterval = 0.15
+    /// 점프가 한 박 안에 끝나므로 메뉴바와 팝오버를 이 간격으로 다시 그린다.
+    static let danceInterval: TimeInterval = 1.0 / 30
 
     static func frame(at date: Date) -> Int {
         Int(date.timeIntervalSinceReferenceDate / frameInterval) % ClawdSprite.frameCount

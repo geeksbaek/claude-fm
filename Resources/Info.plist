@@ -28,5 +28,7 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>메뉴바의 Claude가 지금 나는 소리의 박자에 맞춰 춤추도록, 시스템 오디오의 세기만 확인합니다. 소리는 저장하지 않습니다.</string>
 </dict>
 </plist>

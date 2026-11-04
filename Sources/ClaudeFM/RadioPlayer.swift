@@ -31,7 +31,9 @@ final class RadioPlayer: NSObject, ObservableObject {
     private let hostWindow: NSWindow
     weak var videoContainer: NSView?
     private var triedChannelLive = false
+    private var wantPlay = true
     private let debug = ProcessInfo.processInfo.environment["CLAUDE_FM_DEBUG"] != nil
+    var onPlay: (() -> Void)?
 
     var isPlaying: Bool { status == .playing }
 
@@ -42,6 +44,9 @@ final class RadioPlayer: NSObject, ObservableObject {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
         config.allowsAirPlayForMediaPlayback = true
+        // 라이브가 시스템의 지금 곡이 되면 크롬 유튜브 뮤직 가사를 읽지 못한다.
+        Self.disableMediaSession(config.preferences)
+        Self.declineNowPlayingRegistration()
         webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 320, height: 180), configuration: config)
         webView.setValue(false, forKey: "drawsBackground")
         // 투명한 호스트 창은 가려진 것으로 판정되므로 가림 감지를 끈다(비공개 API라 있을 때만).
@@ -57,6 +62,7 @@ final class RadioPlayer: NSObject, ObservableObject {
         hostWindow.ignoresMouseEvents = true
         hostWindow.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         super.init()
+        Self.disableMediaSession(webView.configuration.preferences)
 
         detachVideo()
         hostWindow.orderFrontRegardless()
@@ -85,6 +91,8 @@ final class RadioPlayer: NSObject, ObservableObject {
     }
 
     func play() {
+        wantPlay = true
+        onPlay?()
         if case .failed = status {
             triedChannelLive = false
             load(videoID: Self.videoID, channel: nil)
@@ -93,7 +101,13 @@ final class RadioPlayer: NSObject, ObservableObject {
         run("fm.play()")
     }
 
-    func pause() { run("fm.pause()") }
+    func pause() {
+        wantPlay = false
+        if status == .loading || status == .playing || status == .buffering {
+            status = .paused
+        }
+        run("fm.pause()")
+    }
 
     /// 팝오버 안의 영상 칸으로 웹뷰를 옮긴다.
     func attachVideo() {
@@ -113,6 +127,25 @@ final class RadioPlayer: NSObject, ObservableObject {
         view.frame = container.bounds
         view.autoresizingMask = [.width, .height]
         container.addSubview(view)
+    }
+
+    /// 이 프로세스에 지금 곡 자격을 주지 않는다. 웹킷 쪽이 자리를 잡는 경우에는 효과가 없다.
+    private static func declineNowPlayingRegistration() {
+        guard let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY),
+              let symbol = dlsym(handle, "MRMediaRemoteSetCanBeNowPlayingApplication") else { return }
+        typealias Setter = @convention(c) (Bool) -> Bool
+        let setter = unsafeBitCast(symbol, to: Setter.self)
+        _ = setter(false)
+    }
+
+    /// 미디어 세션을 끄면 재생은 유지되고, 메뉴바의 지금 곡 자리는 다른 앱에 남는다.
+    private static func disableMediaSession(_ preferences: WKPreferences) {
+        let selector = NSSelectorFromString("_setMediaSessionEnabled:")
+        guard preferences.responds(to: selector) else { return }
+        typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+        let implementation = preferences.method(for: selector)
+        let setter = unsafeBitCast(implementation, to: Setter.self)
+        setter(preferences, selector, false)
     }
 
     private func load(videoID: String, channel: String?) {
@@ -146,9 +179,19 @@ final class RadioPlayer: NSObject, ObservableObject {
         switch type {
         case "ready":
             if let name = value as? String, !name.isEmpty { title = name }
+            if !wantPlay {
+                status = .paused
+                run("fm.pause()")
+            }
         case "state":
             // https://developers.google.com/youtube/iframe_api_reference#onStateChange
-            switch value as? Int {
+            let code = value as? Int
+            if !wantPlay, code == 1 || code == 3 {
+                status = .paused
+                run("fm.pause()")
+                return
+            }
+            switch code {
             case 0: status = .ended
             case 1: status = .playing
             case 2: status = .paused
@@ -181,6 +224,7 @@ final class RadioPlayer: NSObject, ObservableObject {
     const post = (type, value) => window.webkit.messageHandlers.fm.postMessage({ type, value });
     let player;
     let volume = __VOLUME__;
+    let paused = false;
     window.onYouTubeIframeAPIReady = () => {
       const vars = { autoplay: 1, playsinline: 1, rel: 0, origin: "__ORIGIN__" };
       if ("__CHANNEL__") vars.channel = "__CHANNEL__";
@@ -190,10 +234,20 @@ final class RadioPlayer: NSObject, ObservableObject {
         events: {
           onReady: (e) => {
             e.target.setVolume(volume);
-            e.target.playVideo();
+            if (paused) {
+              e.target.pauseVideo();
+              post("state", YT.PlayerState.PAUSED);
+            } else {
+              e.target.playVideo();
+            }
             post("ready", (e.target.getVideoData() || {}).title || "");
           },
           onStateChange: (e) => {
+            if (paused && (e.data === YT.PlayerState.PLAYING || e.data === YT.PlayerState.BUFFERING)) {
+              e.target.pauseVideo();
+              post("state", YT.PlayerState.PAUSED);
+              return;
+            }
             // 재생 전에 정한 음량은 플레이어가 무시하므로 재생이 시작될 때 다시 맞춘다.
             if (e.data === YT.PlayerState.PLAYING) e.target.setVolume(volume);
             post("state", e.data);
@@ -203,8 +257,8 @@ final class RadioPlayer: NSObject, ObservableObject {
       });
     };
     window.fm = {
-      play: () => player && player.playVideo && player.playVideo(),
-      pause: () => player && player.pauseVideo && player.pauseVideo(),
+      play: () => { paused = false; player && player.playVideo && player.playVideo(); },
+      pause: () => { paused = true; player && player.pauseVideo && player.pauseVideo(); },
       setVolume: (v) => { volume = v; player && player.setVolume && player.setVolume(v); },
       progress: () => player && player.getPlayerState
         ? { state: player.getPlayerState(), time: player.getCurrentTime(), muted: player.isMuted(), volume: player.getVolume(), visibility: document.visibilityState }
