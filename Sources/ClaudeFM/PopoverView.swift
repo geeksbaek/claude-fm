@@ -48,6 +48,15 @@ struct PopoverView: View {
                 .help(player.isPlaying ? "일시정지" : "재생")
             }
 
+            // 팝오버가 열려 있으면 말풍선이 숨으므로, 지금 부르는 줄을 여기서 이어 부른다.
+            if singing.nowTitle != nil, singing.isBubbleEnabled {
+                TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
+                    PopoverLyricLine(scene: singing.scene(at: ProcessInfo.processInfo.systemUptime),
+                                     karaoke: singing.isKaraokeEnabled)
+                }
+                .frame(height: 18)
+            }
+
             HStack(spacing: 8) {
                 Image(systemName: "speaker.fill").foregroundStyle(.secondary)
                 Slider(value: $player.volume, in: 0...100)
@@ -207,6 +216,66 @@ struct PopoverView: View {
         case .failed: return .orange
         default: return .secondary
         }
+    }
+}
+
+/// 팝오버 안의 가사 한 줄. 노래방처럼 부른 만큼 코랄로 채우고, 간주에는 다음 줄을 흐리게 미리 보여 준다.
+struct PopoverLyricLine: View {
+    let scene: LyricPerformance?
+    let karaoke: Bool
+
+    private static let sung = Color(nsColor: NSColor(srgbRed: 0.85, green: 0.47, blue: 0.34, alpha: 1))
+
+    var body: some View {
+        if let scene, let line = shown(scene) {
+            HStack(spacing: 6) {
+                Text(line.icon)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Self.sung)
+                if let progress = line.progress {
+                    Text(line.text)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                        .overlay(alignment: .leading) {
+                            GeometryReader { proxy in
+                                Text(line.text)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .lineLimit(1)
+                                    .foregroundStyle(Self.sung)
+                                    .frame(width: proxy.size.width, alignment: .leading)
+                                    .mask(alignment: .leading) {
+                                        Rectangle().frame(width: proxy.size.width * CGFloat(progress))
+                                    }
+                            }
+                        }
+                } else {
+                    Text(line.text)
+                        .font(.system(size: 12, weight: line.dim ? .regular : .semibold))
+                        .foregroundStyle(line.dim ? .secondary : .primary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private struct Shown {
+        var icon: String
+        var text: String
+        var progress: Double?
+        var dim: Bool
+    }
+
+    private func shown(_ scene: LyricPerformance) -> Shown? {
+        let cue = scene.cue
+        if cue.isTitle || cue.isHumming || cue.recap != nil { return nil }
+        if cue.isInterlude {
+            guard let next = cue.next else { return nil }
+            return Shown(icon: "♪", text: next, progress: nil, dim: true)
+        }
+        let elapsed = scene.clock?.elapsed(at: ProcessInfo.processInfo.systemUptime)
+        let progress = karaoke ? elapsed.flatMap { cue.progress(at: $0) } : nil
+        return Shown(icon: "♪", text: cue.current, progress: progress, dim: false)
     }
 }
 

@@ -188,6 +188,11 @@ if let end = overflowSong.lines.first(where: { $0.time == 10 })?.end {
     check(end <= 14, "다음 줄 전에 끝난다 \(end)")
 }
 
+// [offset:+500] 은 가사를 0.5초 일찍 띄운다.
+let offsetSong = LyricSong.make(synced: "[offset:+500]\n[00:10.00]일찍 나오는 줄\n[00:14.00]다음 줄", plain: nil,
+                                duration: 30, instrumental: false)
+check(near(offsetSong.lines.first?.time, 9.5), "LRC offset 은 양수면 일찍 \(String(describing: offsetSong.lines.first?.time))")
+
 // 평문 가사는 노래방 채움을 하지 않는다.
 let plain = LyricSong.make(synced: nil, plain: "하나 둘\n셋 넷", duration: 20, instrumental: false)
 check(!plain.synced, "평문은 동기 아님")

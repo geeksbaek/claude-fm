@@ -81,6 +81,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         stage.onTogglePlayback = { [weak self] in self?.player.toggle() }
         stage.onNudgeSync = { [weak self] seconds in
             guard let self else { return }
+            // 시각이 적힌 가사가 없으면 싱크를 옮겨도 보이지 않으니 저장된 값을 건드리지 않는다.
+            guard self.singing.hasSyncedLyrics else {
+                self.stage.showToast("시각이 적힌 가사가 없어요")
+                return
+            }
             self.singing.nudgeSync(by: seconds)
             self.stage.noteSync(self.singing.syncOffset)
         }
@@ -181,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func syncAnimation() {
         // 박의 점프는 0.1초 안쪽이라, 재생 중이거나 춤추는 동안에는 프레임을 촘촘히 본다.
         // 가사를 부르는 동안에도 반응 그림이 떠오르도록 돌린다.
-        if player.isPlaying || rhythm.isDancing || singing.bubbleShown || stage.isOpen {
+        if player.isPlaying || rhythm.isDancing || singing.bubbleShown || stage.isOpen || singing.performance != nil {
             if animationTimer == nil {
                 let timer = Timer(timeInterval: Animation.danceInterval, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.tick() }
@@ -204,7 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         singing.updateFeeling(rhythm.feeling())
         if pose.showsMotion != rhythm.isDancing {
             rhythm.applyDancing(pose.showsMotion)
-            if !pose.showsMotion, !player.isPlaying, !singing.bubbleShown, !stage.isOpen {
+            if !pose.showsMotion, !player.isPlaying, !singing.bubbleShown, !stage.isOpen, singing.performance == nil {
                 animationTimer?.invalidate()
                 animationTimer = nil
             }

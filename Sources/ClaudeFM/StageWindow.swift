@@ -73,6 +73,10 @@ final class StageWindowController: NSObject, NSWindowDelegate {
         stageView?.flashSync(offset)
     }
 
+    func showToast(_ text: String) {
+        stageView?.toast(text)
+    }
+
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 540),
@@ -149,6 +153,8 @@ final class StageView: NSView {
         pixelLayer.minificationFilter = .nearest
         pixelLayer.contentsGravity = .resize
         pixelLayer.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        // 글자 층(하위 뷰)이 늘 픽셀 무대 위에 오도록 픽셀 층을 뒤로 민다.
+        pixelLayer.zPosition = -1
         layer?.addSublayer(pixelLayer)
         hud.frame = bounds
         hud.autoresizingMask = [.width, .height]
@@ -218,7 +224,7 @@ final class StageView: NSView {
         toast(text)
     }
 
-    private func toast(_ text: String) {
+    func toast(_ text: String) {
         toastText = text
         toastShownAt = ProcessInfo.processInfo.systemUptime
     }
@@ -359,12 +365,23 @@ final class StageView: NSView {
         }
         hudState.idle = !live
         hudState.needsPermission = state.needsPermission && !hearing
+        if let performance = state.performance, let progress = performance.progress(at: now),
+           let position = performance.position, let duration = performance.duration {
+            hudState.songProgress = progress
+            hudState.songTime = "\(Self.clockText(position.elapsed(at: now))) / \(Self.clockText(duration))"
+        }
         let sinceMouse = now - lastMouseMove
         hudState.hint = sinceMouse < 2.5 ? 1 : max(0, 1 - (sinceMouse - 2.5) / 0.6)
         let sinceToast = now - toastShownAt
         hudState.toastLevel = sinceToast < 1.8 ? min(1, (1.8 - sinceToast) / 0.3) : 0
         hudState.toast = hudState.toastLevel > 0 ? toastText : ""
         hud.update(hudState)
+    }
+
+    /// 3:07 처럼 분과 초.
+    static func clockText(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded(.down)))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     /// 폭죽이 터질 때 0.4초 동안 픽셀 한두 칸만큼 흔든다.
@@ -508,6 +525,9 @@ final class StageHUDView: NSView {
         var palette = MoodPalette.of(.groove)
         var hop = 0.0
         var needsPermission = false
+        /// 곡 진행(0...1)과 시각 글자.
+        var songProgress: Double?
+        var songTime = ""
 
         /// 프레임마다 바뀌는 값을 뺀 나머지가 같으면 위쪽 글자는 다시 그리지 않는다.
         func sameHeader(as other: State) -> Bool {
@@ -543,6 +563,7 @@ final class StageHUDView: NSView {
         drawHeader()
         drawCenter()
         drawLyrics()
+        drawProgress()
         drawHint()
         drawToast()
     }
@@ -758,6 +779,23 @@ final class StageHUDView: NSView {
             state.palette.accent.nsColor(alpha: 0.95).setFill()
             NSBezierPath(ovalIn: rect).fill()
         }
+    }
+
+    /// 맨 아래 가는 막대로 곡이 얼마나 흘렀는지 보여 준다.
+    private func drawProgress() {
+        guard let progress = state.songProgress else { return }
+        let height = max(2, 3 * unit)
+        let track = NSRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
+        NSColor.white.withAlphaComponent(0.12).setFill()
+        track.fill()
+        state.palette.primary.nsColor(alpha: 0.9).setFill()
+        NSRect(x: 0, y: track.minY, width: bounds.width * CGFloat(progress), height: height).fill()
+        guard state.hint > 0.01, !state.songTime.isEmpty else { return }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11 * unit, weight: .medium),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.6 * state.hint),
+        ]
+        (state.songTime as NSString).draw(at: NSPoint(x: 18 * unit, y: bounds.height - height - 22 * unit), withAttributes: attrs)
     }
 
     // MARK: - 안내

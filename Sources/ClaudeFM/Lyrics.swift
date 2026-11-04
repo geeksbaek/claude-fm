@@ -135,10 +135,19 @@ struct PlaybackClock: Equatable {
 /// 지금 곡에서 보여 줄 한 장면. 말풍선과 무대가 같이 쓴다.
 struct LyricPerformance: Equatable {
     var cue: LyricCue
-    /// 동기 가사일 때만 있다.
+    /// 동기 가사일 때만 있다. 가사 싱크를 반영한 곡 시각.
     var clock: PlaybackClock?
     var title: String
     var artist: String
+    /// 싱크를 반영하지 않은 실제 재생 위치. 진행 막대에 쓴다.
+    var position: PlaybackClock?
+    var duration: TimeInterval?
+
+    /// 곡에서 얼마나 왔는지(0...1). 길이를 모르면 nil.
+    func progress(at now: TimeInterval) -> Double? {
+        guard let position, let duration, duration > 1 else { return nil }
+        return min(1, max(0, position.elapsed(at: now) / duration))
+    }
 }
 
 struct LyricSong: Equatable {
@@ -253,11 +262,12 @@ struct LyricSong: Equatable {
 extension LyricSong {
     fileprivate static func parseSynced(_ raw: String, duration: TimeInterval?) -> LyricSong? {
         let source = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        // LRC 의 [offset:] 은 양수면 가사를 그만큼 일찍 띄운다. 시각에 더할 값으로 바꿔 둔다.
         var offset = 0.0
         if let match = offsetPattern.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
            let range = Range(match.range(at: 1), in: source),
            let milliseconds = Double(source[range]) {
-            offset = milliseconds / 1000
+            offset = -milliseconds / 1000
         }
         var rows: [(time: TimeInterval, text: String)] = []
         var marksByTime: [TimeInterval: [LyricMark]] = [:]

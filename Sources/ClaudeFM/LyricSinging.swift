@@ -178,7 +178,7 @@ final class LyricSinging: ObservableObject {
 
     /// 메뉴바 Clawd 가 따라 할 가사 반응. 줄을 부르는 동안만 있다.
     var spriteAccent: (reaction: LyricReaction?, hook: Bool) {
-        guard isReactionEnabled, let cue = performance?.cue,
+        guard isReactionEnabled, wantsLyrics, let cue = performance?.cue,
               !cue.isInterlude, !cue.isHumming, !cue.isTitle, cue.recap == nil else { return (nil, false) }
         return (cue.reaction, cue.isHook)
     }
@@ -377,7 +377,8 @@ final class LyricSinging: ObservableObject {
             if song.instrumental {
                 cue = .interlude()
             } else if let found = song.cue(at: elapsed), !found.current.isEmpty {
-                cue = found
+                // 곡 기록은 가사 반응을 켰을 때만 보여 준다.
+                cue = found.recap != nil && !isReactionEnabled ? .interlude() : found
             } else {
                 cue = .humming()
             }
@@ -391,7 +392,9 @@ final class LyricSinging: ObservableObject {
             cue: cue,
             clock: song?.synced == true ? clock : nil,
             title: shownTitle,
-            artist: snapshot.artist
+            artist: snapshot.artist,
+            position: PlaybackClock(elapsed: snapshot.elapsed(at: now), uptime: now, rate: snapshot.rate),
+            duration: snapshot.duration
         )
     }
 
@@ -440,7 +443,7 @@ final class LyricSinging: ObservableObject {
 
     /// 후렴 덩어리 첫 줄이 시작하는 박에 한 번만 알린다. 곡 첫머리의 후렴은 건너뛴다.
     private func celebrateIfHookStarts(_ scene: LyricPerformance) {
-        guard isReactionEnabled, scene.cue.hookStart, let start = scene.cue.start, let clock = scene.clock,
+        guard isReactionEnabled, wantsLyrics, scene.cue.hookStart, let start = scene.cue.start, let clock = scene.clock,
               start != lastHookStart else { return }
         let elapsed = clock.elapsed
         guard elapsed >= start - 0.03 else { return }
