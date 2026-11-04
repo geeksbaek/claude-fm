@@ -491,9 +491,12 @@ final class BubbleView: NSView {
         return CGFloat(progress)
     }
 
+    /// 미리보기 도구가 '동작 줄이기'와 상관없이 움직임을 그려 볼 때 쓴다.
+    static var motionOverride: Bool?
+
     /// 필링 효과가 켜져 있고 '동작 줄이기'가 꺼져 있을 때만 움직인다. 색과 빛은 그대로 둔다.
     private var motionEnabled: Bool {
-        style.feeling && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        style.feeling && (Self.motionOverride ?? !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
     /// 지금 줄이 후렴이라 금빛으로 꾸미는지.
@@ -922,7 +925,7 @@ final class BubbleView: NSView {
         let shout = CGFloat(feeling.shout)
         let whisper = CGFloat(feeling.whisper)
         let energy = CGFloat(min(1, feeling.wave * 0.8 + feeling.bass * 0.5))
-        let ripple = motion && feeling.sinceBeat < 1 ? 1.5 * energy : 0
+        let ripple = motion && feeling.sinceBeat < 1 ? 2.1 * energy : 0
         let tremble = motion && shout > 0.25 ? (shout - 0.25) * 1.6 : 0
         let breath = motion && whisper > 0.15 ? whisper * 1.5 : 0
         let gold = (Self.hookGold.usingColorSpace(.sRGB) ?? Self.hookGold).withAlphaComponent(alpha)
@@ -965,8 +968,8 @@ final class BubbleView: NSView {
                     amount = CGFloat(min(1, max(0, sung - Double(letter))))
                     if motion, sung < total {
                         let near = max(0, 1 - abs(sung - (Double(letter) + 0.5)) / 0.9)
-                        scale += CGFloat(near) * 0.12
-                        dy -= CGFloat(near) * 1.3
+                        scale += CGFloat(near) * 0.14
+                        dy -= CGFloat(near) * 1.6
                     }
                 } else if slot.lettersBefore > 0, sung >= Double(slot.lettersBefore) {
                     amount = 1

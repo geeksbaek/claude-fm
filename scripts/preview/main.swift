@@ -145,6 +145,8 @@ let bubbleCases: [BubbleCase] = [
 ]
 
 let freeze = 1_000.0
+// CI 맥은 '동작 줄이기'가 켜져 있을 수 있다. 미리보기에서는 움직임도 그려 본다.
+MainActor.assumeIsolated { BubbleView.motionOverride = true }
 MainActor.assumeIsolated {
     var lightReps: [NSBitmapImageRep] = []
     var darkReps: [NSBitmapImageRep] = []
