@@ -161,7 +161,8 @@ final class StageStreamServer: @unchecked Sendable {
 
     private func respond(to request: StageHTTPRequest, client: Client) {
         client.answered = true
-        if Self.isRemote(client.connection.endpoint) {
+        // 우리 길을 아는 요청만 TV 가 받아 간 것으로 센다. 같은 망의 다른 기기가 두드린 것은 세지 않는다.
+        if request.path.hasPrefix(basePath), Self.isRemote(client.connection.endpoint) {
             counters.lock()
             remoteCount += 1
             remoteAt = ProcessInfo.processInfo.systemUptime

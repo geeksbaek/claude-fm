@@ -530,8 +530,11 @@ final class BubbleView: NSView {
             if squash != 0 {
                 // 꼬리 끝을 붙잡고 눌렸다가 용수철처럼 튀어 오른다. 아이콘에서 떨어지지 않는다.
                 let anchor = CGPoint(x: min(max(tailX, 0), bounds.width), y: Self.outerPad)
+                // 옆으로 퍼질 때 창 가장자리에 잘리지 않을 만큼만 퍼진다.
+                let reach = max(1, max(anchor.x, bounds.width - anchor.x) - Self.outerPad)
+                let widen = min(squash * 0.55, (Self.outerPad - 4) / reach)
                 context.translateBy(x: anchor.x, y: anchor.y)
-                context.scaleBy(x: 1 + squash * 0.55, y: 1 - squash)
+                context.scaleBy(x: 1 + widen, y: 1 - squash)
                 context.translateBy(x: -anchor.x, y: -anchor.y)
             }
         }
@@ -878,7 +881,14 @@ final class BubbleView: NSView {
                 if isLetter { letters += 1 }
                 offset += length
             }
-            let line = CTLineCreateWithAttributedString(NSAttributedString(string: lineText, attributes: attributes))
+            var line = CTLineCreateWithAttributedString(NSAttributedString(string: lineText, attributes: attributes))
+            // 말풍선보다 긴 줄은 끝을 말줄임표로 줄인다. 줄어든 글자까지 부르는 동안 채움은 말줄임표 앞에 머문다.
+            if CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)) > rect.width + 0.5 {
+                let ellipsis = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: attributes))
+                if let truncated = CTLineCreateTruncatedLine(line, Double(rect.width), .end, ellipsis) {
+                    line = truncated
+                }
+            }
             var ascent: CGFloat = 0
             var descent: CGFloat = 0
             var leading: CGFloat = 0
@@ -1066,7 +1076,7 @@ final class BubbleView: NSView {
         let strength = CGFloat(min(1, (feeling.bass - 0.5) * 2 + 0.35))
         NSGraphicsContext.saveGraphicsState()
         (hook ? Self.hookGold : Self.stroke).withAlphaComponent(0.34 * (1 - spread) * (1 - spread) * strength).setStroke()
-        path.lineWidth = 1.5 + spread * 8.5
+        path.lineWidth = 1.5 + spread * 5.5
         path.lineJoinStyle = .round
         path.stroke()
         NSGraphicsContext.restoreGraphicsState()

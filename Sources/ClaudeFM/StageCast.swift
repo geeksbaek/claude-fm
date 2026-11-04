@@ -150,6 +150,8 @@ final class StageCaster: NSObject, ObservableObject, NSMenuDelegate {
     var startSound: ((StageAudioRing) -> CastSound)?
     /// 이 Mac 소리를 되돌린다.
     var stopSound: (() -> Void)?
+    /// TV 가 틀기 시작했으니 이 Mac 소리를 끈다.
+    var muteMac: (() -> Void)?
     /// 지금 오디오 탭의 표본율.
     var sampleRate: (() -> Double?)?
 
@@ -419,6 +421,7 @@ final class StageCaster: NSObject, ObservableObject, NSMenuDelegate {
         case .media(let state):
             guard state == "PLAYING", case .connecting = phase else { return }
             phase = .casting(device)
+            if sound == .sending { muteMac?() }
             onNotice?("TV 로 보내는 중 · \(device.name)", sound == .sending ? soundLine : nil)
             changed()
         case .mediaIdle(let reason):

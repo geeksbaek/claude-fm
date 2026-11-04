@@ -317,6 +317,8 @@ extension HangulReading {
         var digit: Int?
         for char in raw {
             if let value = japaneseNumeralDigits[char] {
+                // 숫자가 너무 길면 넘치기 전에 운영체제 읽기로 돌린다.
+                guard (digit ?? 0) < 100_000_000 else { return nil }
                 digit = (digit ?? 0) * 10 + value
             } else if let unit = japaneseNumeralUnits[char] {
                 section += (digit ?? 1) * unit
@@ -330,7 +332,9 @@ extension HangulReading {
                 return nil
             }
         }
-        return total + section + (digit ?? 0)
+        let value = total + section + (digit ?? 0)
+        // 1조 넘는 수는 万·億 로 읽을 수 없다.
+        return value < 1_000_000_000_000 ? value : nil
     }
 
     enum JapaneseCounterSound { case plain, gemK, gemS, gemP, day, native, person }
@@ -434,6 +438,11 @@ extension HangulReading {
     /// 숫자를 앞부분과 마지막 자리 조각으로 나눈다. 조수사는 마지막 조각의 소리만 바꾼다.
     static func japaneseNumberParts(_ value: Int) -> (head: String, last: String, unit: Int) {
         guard value > 0 else { return ("", "zero", 0) }
+        // 1조 넘는 수는 자리마다 읽는다.
+        guard value < 1_000_000_000_000 else {
+            let digits = String(value).compactMap { $0.wholeNumberValue }
+            return ("", digits.map { $0 == 0 ? "zero" : japaneseDigitRomaji[$0] }.joined(), 0)
+        }
         var head = ""
         let oku = value / 100_000_000, man = (value / 10_000) % 10_000, rest = value % 10_000
         var parts: [(String, Int)] = []

@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         caster.onNotice = { [weak self] line, detail in self?.showCastNotice(line, detail: detail) }
         caster.startSound = { [weak self] ring in self?.rhythm.sendSound(to: ring) ?? .unsupported }
         caster.stopSound = { [weak self] in self?.rhythm.keepSoundHere() }
+        caster.muteMac = { [weak self] in self?.rhythm.muteHere() }
         caster.sampleRate = { [weak self] in self?.rhythm.tapSampleRate }
         stage.onTogglePlayback = { [weak self] in self?.player.toggle() }
         stage.onNudgeSync = { [weak self] seconds in
