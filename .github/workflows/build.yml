@@ -23,6 +23,13 @@ jobs:
         shell: bash
         run: swift build -c release --product ClaudeFM
 
+      - name: Bundle app
+        shell: bash
+        run: |
+          ./scripts/build.sh
+          test -x "build/Claude FM.app/Contents/MacOS/ClaudeFM"
+          codesign --verify --verbose "build/Claude FM.app"
+
       - name: Logic checks
         shell: bash
         run: ./scripts/check.sh

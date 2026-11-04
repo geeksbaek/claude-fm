@@ -147,6 +147,32 @@ if let cue = enhancedSong.cue(at: 10.5) {
     check(p2 > p1 && p2 < 0.75, "둘째 낱말 중간 \(p2)")
 }
 
+// 거의 모든 줄이 되풀이되는 곡은 가장 많이 되풀이되는 줄만 후렴으로 본다.
+var loopLRC = ""
+let loopLines = ["춤을 춰 춤을 춰요", "밤새도록 춤을 춰", "춤을 춰 춤을 춰요", "밤새도록 춤을 춰",
+                 "춤을 춰 춤을 춰요", "새벽까지 달려가", "춤을 춰 춤을 춰요", "새벽까지 달려가"]
+for (index, text) in loopLines.enumerated() {
+    loopLRC += String(format: "[00:%02d.00]%@\n", 10 + index * 4, text)
+}
+let loopSong = LyricSong.make(synced: loopLRC, plain: nil, duration: 60, instrumental: false)
+let loopHooks = loopSong.lines.filter(\.isHook).map(\.text)
+check(!loopHooks.isEmpty && loopHooks.count < loopLines.count, "반복곡 후렴을 다 잡지는 않는다 \(loopHooks)")
+check(loopHooks.allSatisfy { $0 == "춤을 춰 춤을 춰요" }, "가장 많이 되풀이되는 줄만 후렴 \(loopHooks)")
+
+// 연주곡은 늘 간주.
+let instrumental = LyricSong.make(synced: nil, plain: nil, duration: 200, instrumental: true)
+check(instrumental.cue(at: 30)?.isInterlude == true, "연주곡은 간주")
+
+// 낱말 시각이 다음 줄을 넘어가도 다음 줄 전에 끝낸다.
+let overflow = """
+[00:10.00]<00:10.00>하나 <00:13.00>둘 <00:19.00>셋
+[00:14.00]다음 줄
+"""
+let overflowSong = LyricSong.make(synced: overflow, plain: nil, duration: 30, instrumental: false)
+if let end = overflowSong.lines.first(where: { $0.time == 10 })?.end {
+    check(end <= 14, "다음 줄 전에 끝난다 \(end)")
+}
+
 // 평문 가사는 노래방 채움을 하지 않는다.
 let plain = LyricSong.make(synced: nil, plain: "하나 둘\n셋 넷", duration: 20, instrumental: false)
 check(!plain.synced, "평문은 동기 아님")
