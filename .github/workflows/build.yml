@@ -1,0 +1,52 @@
+name: build
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Build app
+        shell: bash
+        run: swift build -c release --product ClaudeFM
+
+      - name: Bundle app
+        shell: bash
+        run: |
+          ./scripts/build.sh
+          test -x "build/Claude FM.app/Contents/MacOS/ClaudeFM"
+          codesign --verify --verbose "build/Claude FM.app"
+
+      - name: Logic checks
+        shell: bash
+        run: ./scripts/check.sh
+
+      - name: Render previews
+        shell: bash
+        run: |
+          ./scripts/preview.sh previews
+          mkdir -p .build/tools
+          swiftc -O scripts/render/main.swift Sources/ClaudeFM/{ClawdSprite,ClawdPixels,DanceModel,PixelArt,LyricReaction}.swift \
+            -o .build/tools/render
+          .build/tools/render sheet previews/sheet.png
+          .build/tools/render icon previews/AppIcon.iconset
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: previews
+          path: previews
+          if-no-files-found: warn

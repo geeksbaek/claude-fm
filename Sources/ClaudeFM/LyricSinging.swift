@@ -5,22 +5,16 @@ import AppKit
 final class LyricSinging: ObservableObject {
     private static let bubbleEnabledKey = "lyricBubbleEnabled"
     private static let feelingEnabledKey = "lyricFeelingEnabled"
+    private static let karaokeEnabledKey = "lyricKaraokeEnabled"
+    private static let reactionEnabledKey = "lyricReactionEnabled"
+    private static let syncOffsetKey = "lyricSyncOffset"
+    /// 싱크는 이 범위 안에서 0.1초씩 옮긴다.
+    static let syncRange: ClosedRange<Double> = -3...3
 
     @Published var isBubbleEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isBubbleEnabled, forKey: Self.bubbleEnabledKey)
-            if isBubbleEnabled, song == nil, let snapshot, let trackKey, resolvedKey != trackKey {
-                let now = ProcessInfo.processInfo.systemUptime
-                let track = NowTrack(
-                    title: snapshot.title,
-                    artist: snapshot.artist,
-                    album: snapshot.album,
-                    duration: snapshot.duration,
-                    elapsed: snapshot.elapsed(at: now),
-                    rate: snapshot.rate
-                )
-                fetch(track, key: trackKey)
-            }
+            fetchIfNeeded()
             present()
         }
     }
@@ -34,6 +28,36 @@ final class LyricSinging: ObservableObject {
         }
     }
 
+    /// 노래방처럼 부른 만큼 글자를 채운다.
+    @Published var isKaraokeEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isKaraokeEnabled, forKey: Self.karaokeEnabledKey)
+            present()
+        }
+    }
+
+    /// 가사 속 낱말(사랑·별·불꽃…)에 맞춘 그림과 후렴 폭죽.
+    @Published var isReactionEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isReactionEnabled, forKey: Self.reactionEnabledKey)
+            present()
+        }
+    }
+
+    /// 가사를 늦추는 초. 블루투스 헤드폰처럼 소리가 늦게 들리면 올린다.
+    @Published private(set) var syncOffset: Double {
+        didSet {
+            UserDefaults.standard.set(syncOffset, forKey: Self.syncOffsetKey)
+            present()
+        }
+    }
+
+    /// 다른 앱에서 지금 재생 중인 곡. 팝오버와 무대에 보여 준다.
+    @Published private(set) var nowTitle: String?
+    @Published private(set) var nowArtist: String?
+    /// 시각이 적힌 가사를 찾았는지. 싱크 조절을 보여 줄지 가린다.
+    @Published private(set) var hasSyncedLyrics = false
+
     private let bubble = LyricBubble()
     private let button: () -> NSButton?
     private var timer: Timer?
@@ -46,6 +70,7 @@ final class LyricSinging: ObservableObject {
     private var failedAt = 0.0
     private var fetchingKey: String?
     private var suppressed = false
+    private var stageActive = false
     private var externalPlaying = false
     private var pauseGraceUntil = 0.0
     private var preview: String?
@@ -53,25 +78,43 @@ final class LyricSinging: ObservableObject {
     private var currentFeeling = VocalFeeling.calm
     private var lastAnchor: (rect: NSRect, screen: NSScreen)?
     private var spaceObserver: NSObjectProtocol?
+    private var titleCardUntil = 0.0
+    private var lastHookStart: TimeInterval?
+    /// 마지막으로 폭죽을 알린 시스템 시각. 후렴 덩어리가 잘게 쪼개져도 몇 초 사이에 두 번 터지지 않게 한다.
+    private var lastCelebration: TimeInterval = -1_000
     private let debug = ProcessInfo.processInfo.environment["CLAUDE_FM_DEBUG"] != nil
     /// 말풍선이 떠 있는 동안 상태 아이콘 툴팁이 가사를 가리지 않게 한다.
     private(set) var bubbleShown = false
+    /// 지금 보여 주는 장면. 메뉴바 Clawd 와 무대가 읽는다.
+    private(set) var performance: LyricPerformance?
     var onBubbleVisibility: ((Bool) -> Void)?
     /// 다른 앱에서 노래가 재생 중이면 라디오를 멈추도록 알린다.
     var onExternalSongPlaying: (() -> Void)?
+    /// 동기 가사의 후렴 덩어리가 시작할 때. 폭죽을 터뜨린다.
+    var onHookStart: ((LyricCue) -> Void)?
+    /// 간주 끝 카운트다운을 박에 맞추려고 박 간격을 묻는다.
+    var beatPeriod: (() -> Double?)?
+    /// 무대가 지금 화면에 보이는지. 보일 때만 말풍선을 숨긴다.
+    var stageIsVisible: (() -> Bool)?
+    /// 곡이 끝까지 흘렀을 때. 다음 곡이 곧바로 시작했으면 true. 앵콜 박수를 친다.
+    var onSongFinished: ((Bool) -> Void)?
+    private var applaudedKey: String?
+    /// 이 곡을 실제로 재생하며 들은 초. 끝부분으로 넘기기만 한 곡은 완주로 세지 않는다.
+    private var listenedSeconds = 0.0
+    private var lastListenUptime = 0.0
 
     init(button: @escaping () -> NSButton?) {
         self.button = button
-        if UserDefaults.standard.object(forKey: Self.bubbleEnabledKey) == nil {
-            self.isBubbleEnabled = true
-        } else {
-            self.isBubbleEnabled = UserDefaults.standard.bool(forKey: Self.bubbleEnabledKey)
+        let defaults = UserDefaults.standard
+        func flag(_ key: String) -> Bool {
+            defaults.object(forKey: key) == nil ? true : defaults.bool(forKey: key)
         }
-        if UserDefaults.standard.object(forKey: Self.feelingEnabledKey) == nil {
-            self.isFeelingEnabled = true
-        } else {
-            self.isFeelingEnabled = UserDefaults.standard.bool(forKey: Self.feelingEnabledKey)
-        }
+        isBubbleEnabled = flag(Self.bubbleEnabledKey)
+        isFeelingEnabled = flag(Self.feelingEnabledKey)
+        isKaraokeEnabled = flag(Self.karaokeEnabledKey)
+        isReactionEnabled = flag(Self.reactionEnabledKey)
+        let savedOffset = (defaults.double(forKey: Self.syncOffsetKey) * 10).rounded() / 10
+        syncOffset = Self.syncRange.contains(savedOffset) ? savedOffset : 0
     }
 
     func start() {
@@ -110,6 +153,14 @@ final class LyricSinging: ObservableObject {
         present()
     }
 
+    /// 무대가 열려 있으면 말풍선 대신 무대가 가사를 부른다. 말풍선을 꺼 두었어도 가사는 찾는다.
+    func setStageActive(_ active: Bool) {
+        guard stageActive != active else { return }
+        stageActive = active
+        fetchIfNeeded()
+        present()
+    }
+
     /// Claude FM을 재생할 때 다른 미디어 재생을 일시중지한다.
     func pauseExternalMedia() {
         pauseGraceUntil = ProcessInfo.processInfo.systemUptime + 3.5
@@ -124,6 +175,32 @@ final class LyricSinging: ObservableObject {
         currentFeeling = feeling
         guard bubbleShown else { return }
         bubble.updateFeeling(feeling, enabled: isFeelingEnabled)
+    }
+
+    /// 무대가 프레임마다 묻는 지금 장면. 말풍선보다 촘촘히 새 줄을 알아챈다.
+    func scene(at now: TimeInterval) -> LyricPerformance? {
+        makePerformance(at: now)
+    }
+
+    /// 메뉴바 Clawd 가 따라 할 가사 반응. 줄을 부르는 동안만 있다.
+    var spriteAccent: (reaction: LyricReaction?, hook: Bool) {
+        guard isReactionEnabled, wantsLyrics, let cue = performance?.cue,
+              !cue.isInterlude, !cue.isHumming, !cue.isTitle, cue.recap == nil else { return (nil, false) }
+        return (cue.reaction, cue.isHook)
+    }
+
+    /// 가사 싱크를 0.1초 단위로 옮긴다. 0 이면 처음으로 되돌린다.
+    func nudgeSync(by seconds: Double) {
+        let target = seconds == 0 ? 0 : syncOffset + seconds
+        let clamped = min(Self.syncRange.upperBound, max(Self.syncRange.lowerBound, (target * 10).rounded() / 10))
+        if clamped != syncOffset { syncOffset = clamped }
+    }
+
+    /// 말풍선으로 잠깐 알린다. 지금 곡 가사보다 먼저 보인다.
+    func announce(_ line: String, next: String?, seconds: TimeInterval) {
+        preview = next.map { line + "|" + $0 } ?? line
+        previewUntil = ProcessInfo.processInfo.systemUptime + seconds
+        present()
     }
 
     /// 디버그에서 말풍선 모양만 확인할 때. 비우면 영어·일본어·중국어 예시 발음을 보여 준다.
@@ -158,6 +235,12 @@ final class LyricSinging: ObservableObject {
         }
     }
 
+    /// 말풍선이나 무대가 가사를 원하는지.
+    var wantsLyrics: Bool { isBubbleEnabled || stageActive }
+
+    /// 다른 앱에서 지금 노래가 흐르는 중인지.
+    var externalSongPlaying: Bool { abs(snapshot?.rate ?? 0) > 0.05 }
+
     private func tick() {
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastPoll >= 0.8 {
@@ -182,11 +265,16 @@ final class LyricSinging: ObservableObject {
     private func apply(_ track: NowTrack?) {
         guard let track else {
             externalPlaying = false
+            if let trackKey, finishedNaturally(snapshot, at: ProcessInfo.processInfo.systemUptime, window: 4) {
+                applaud(trackKey, nextStarted: false)
+            }
             if snapshot != nil {
                 snapshot = nil
                 song = nil
                 trackKey = nil
                 resolvedKey = nil
+                setNowPlaying(title: nil, artist: nil)
+                setSyncedLyrics(false)
                 present()
             }
             return
@@ -216,21 +304,84 @@ final class LyricSinging: ObservableObject {
                 currentTrack.elapsed = prevElapsed
             }
         }
+        // 같은 곡이 처음으로 돌아갔는지(한 곡 반복, 처음으로 되감기).
+        let restarted = key == trackKey && abs(currentTrack.rate) > 0.05 && currentTrack.elapsed < 5
+            && (snapshot.map { $0.elapsed(at: now) > 20 } ?? false)
+        // 실제로 재생하며 흐른 시간을 센다. 폴링 사이가 길게 벌어진 만큼은 세지 않는다.
+        if key == trackKey, let previous = snapshot, abs(previous.rate) > 0.05, now >= pauseGraceUntil {
+            listenedSeconds += min(max(0, now - lastListenUptime), 2)
+        }
+        lastListenUptime = now
+        // 곡이 끝까지 흐른 뒤 다음 곡으로 넘어가거나, 멈추거나, 처음부터 다시 시작하면 앵콜 박수를 친다.
+        // 다음 곡으로 넘어갈 때는 크로스페이드를 생각해 끝 12초 안이면 끝난 것으로 본다.
+        let changed = key != trackKey
+        if let previousKey = trackKey, now >= pauseGraceUntil,
+           changed || abs(currentTrack.rate) <= 0.05 || restarted,
+           finishedNaturally(snapshot, at: now, window: changed || restarted ? 12 : 4) {
+            applaud(previousKey, nextStarted: (changed || restarted) && abs(currentTrack.rate) > 0.05)
+            listenedSeconds = 0
+        }
+        if restarted || changed {
+            listenedSeconds = 0
+        }
+        if restarted {
+            // 다시 듣는 곡도 후렴 폭죽을 다시 셀 수 있게 한다.
+            lastHookStart = nil
+        }
+        if abs(currentTrack.rate) > 0.05, currentTrack.elapsed < 5 {
+            // 곡 첫머리를 듣고 있으면, 이 곡이 다시 끝까지 흐를 때 또 박수를 칠 수 있다.
+            applaudedKey = nil
+        }
         snapshot = Snapshot(currentTrack, at: now)
+        setNowPlaying(title: currentTrack.title, artist: currentTrack.artist)
         if key != trackKey {
             trackKey = key
             song = nil
             resolvedKey = nil
             failedAt = 0
+            lastHookStart = nil
+            setSyncedLyrics(false)
+            // 곡이 바뀌면 전주 동안 제목을 잠깐 보여 준다. 가사가 곧 시작하면 그 전에 걷는다.
+            titleCardUntil = abs(currentTrack.rate) > 0.05 ? now + 4.5 : 0
             if debug { NSLog("ClaudeFM lyric lookup %@ / %@", currentTrack.title, currentTrack.artist) }
-            if isBubbleEnabled {
+            if wantsLyrics {
                 fetch(currentTrack, key: key)
             }
-        } else if isBubbleEnabled, song == nil, resolvedKey != key, failedAt > 0,
+        } else if wantsLyrics, song == nil, resolvedKey != key, failedAt > 0,
                   now - failedAt > 5 {
             fetch(currentTrack, key: key)
         }
         present()
+    }
+
+    /// 재생 중이던 곡이 끝 `window` 초 안까지 왔고, 곡 길이의 절반 넘게 실제로 들었는지.
+    /// 30초가 안 되는 짧은 소리나, 끝부분으로 넘기기만 한 곡은 빼고 본다.
+    private func finishedNaturally(_ snapshot: Snapshot?, at now: TimeInterval, window: TimeInterval) -> Bool {
+        guard let snapshot, abs(snapshot.rate) > 0.05, let duration = snapshot.duration, duration > 30 else { return false }
+        guard listenedSeconds >= duration * 0.5 else { return false }
+        return snapshot.elapsed(at: now) >= duration - window
+    }
+
+    /// 완주를 알린다. 박수는 가사 반응을 켰을 때만 치지만, 완주 수는 늘 센다.
+    private func applaud(_ key: String, nextStarted: Bool) {
+        guard applaudedKey != key else { return }
+        applaudedKey = key
+        onSongFinished?(nextStarted)
+    }
+
+    /// 말풍선을 켜거나 무대를 열었을 때, 아직 찾지 않은 지금 곡의 가사를 찾는다.
+    private func fetchIfNeeded() {
+        guard wantsLyrics, song == nil, let snapshot, let trackKey, resolvedKey != trackKey else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let track = NowTrack(
+            title: snapshot.title,
+            artist: snapshot.artist,
+            album: snapshot.album,
+            duration: snapshot.duration,
+            elapsed: snapshot.elapsed(at: now),
+            rate: snapshot.rate
+        )
+        fetch(track, key: trackKey)
     }
 
     private func fetch(_ track: NowTrack, key: String) {
@@ -251,6 +402,7 @@ final class LyricSinging: ObservableObject {
                 if let found {
                     self.song = found
                     self.resolvedKey = key
+                    self.setSyncedLyrics(found.synced && !found.instrumental)
                     if self.debug {
                         NSLog("ClaudeFM lyric hit %d줄 instrumental %@", found.lines.count, found.instrumental ? "yes" : "no")
                     }
@@ -264,8 +416,64 @@ final class LyricSinging: ObservableObject {
         }
     }
 
+    private func setNowPlaying(title: String?, artist: String?) {
+        if nowTitle != title { nowTitle = title }
+        let shownArtist = (artist?.isEmpty == false) ? artist : nil
+        if nowArtist != shownArtist { nowArtist = shownArtist }
+    }
+
+    private func setSyncedLyrics(_ synced: Bool) {
+        if hasSyncedLyrics != synced { hasSyncedLyrics = synced }
+    }
+
+    /// 지금 곡 시각에 맞는 장면을 고른다. 재생 중이 아니면 nil.
+    private func makePerformance(at now: TimeInterval) -> LyricPerformance? {
+        guard let snapshot, abs(snapshot.rate) > 0.05 else { return nil }
+        let clock = PlaybackClock(elapsed: snapshot.elapsed(at: now) - syncOffset, uptime: now, rate: snapshot.rate)
+        let elapsed = clock.elapsed
+        // 판본 표시나 (Official Video) 같은 꼬리표는 떼고 보여 준다.
+        let shownTitle = LyricMatch.baseTitle(snapshot.title)
+        let cue: LyricCue
+        if now < titleCardUntil, showsTitleCard(at: elapsed) {
+            cue = .title(shownTitle, artist: snapshot.artist)
+        } else if let song {
+            if song.instrumental {
+                cue = .interlude()
+            } else if let found = song.cue(at: elapsed), !found.current.isEmpty {
+                // 곡 기록은 가사 반응을 켰을 때만 보여 준다.
+                cue = found.recap != nil && !isReactionEnabled ? .interlude() : found
+            } else {
+                cue = .humming()
+            }
+        } else if fetchingKey == nil || (failedAt > 0 && now - failedAt > 0.8) {
+            // 가사 조회가 끝났는데도 가사를 모를 때(또는 조회가 길어질 때)는 흥얼거리는 효과를 띄운다.
+            cue = .humming()
+        } else {
+            return nil
+        }
+        return LyricPerformance(
+            cue: cue,
+            clock: song?.synced == true ? clock : nil,
+            title: shownTitle,
+            artist: snapshot.artist,
+            position: PlaybackClock(elapsed: snapshot.elapsed(at: now), uptime: now, rate: snapshot.rate),
+            duration: snapshot.duration
+        )
+    }
+
+    /// 첫 줄이 곧 시작하면 제목 카드를 일찍 걷어 카운트다운이 보이게 한다.
+    private func showsTitleCard(at elapsed: TimeInterval) -> Bool {
+        guard let song, !song.instrumental, song.synced else { return true }
+        guard let first = song.lines.first(where: { !$0.text.isEmpty }) else { return true }
+        return elapsed < first.time - LyricCue.countdownBeat(beatPeriod?()) * Double(LyricCue.countdownDots) - 0.6
+    }
+
     private func present() {
         let now = ProcessInfo.processInfo.systemUptime
+        let scene = makePerformance(at: now)
+        performance = scene
+        if let scene { celebrateIfHookStarts(scene) }
+
         if let preview, now < previewUntil {
             if isBubbleEnabled, !suppressed, let anchor = anchor() {
                 let parts = preview.components(separatedBy: "|")
@@ -281,38 +489,43 @@ final class LyricSinging: ObservableObject {
                 } else {
                     cue = LyricCue(current: current, next: next)
                 }
-                showBubble(cue, anchor)
+                showBubble(cue, clock: nil, anchor)
             } else {
                 hideBubble()
             }
             return
         }
         preview = nil
-        guard isBubbleEnabled, !suppressed, let snapshot, abs(snapshot.rate) > 0.05, let anchor = anchor() else {
+        let stageCovers = stageActive && (stageIsVisible?() ?? true)
+        guard isBubbleEnabled, !suppressed, !stageCovers, let scene, let anchor = anchor() else {
             hideBubble()
             return
         }
-        if let song {
-            if song.instrumental {
-                showBubble(.interlude(), anchor)
-            } else if let cue = song.cue(at: snapshot.elapsed(at: now)), !cue.current.isEmpty {
-                showBubble(cue, anchor)
-            } else {
-                showBubble(.humming(), anchor)
-            }
-            return
-        }
-        // 가사 조회가 끝났는데도 가사를 모를 때(또는 조회가 길어질 때)는 흥얼거리는 효과를 띄운다.
-        if fetchingKey == nil || (failedAt > 0 && now - failedAt > 0.8) {
-            showBubble(.humming(), anchor)
-        } else {
-            hideBubble()
-        }
+        showBubble(scene.cue, clock: scene.clock, anchor)
     }
 
-    private func showBubble(_ cue: LyricCue, _ anchor: (rect: NSRect, screen: NSScreen)) {
+    /// 후렴 덩어리 첫 줄이 시작하는 박에 한 번만 알린다. 곡 첫머리의 후렴은 건너뛴다.
+    private func celebrateIfHookStarts(_ scene: LyricPerformance) {
+        guard isReactionEnabled, wantsLyrics, scene.cue.hookStart, let start = scene.cue.start, let clock = scene.clock,
+              start != lastHookStart else { return }
+        let elapsed = clock.elapsed
+        guard elapsed >= start - 0.03 else { return }
+        lastHookStart = start
+        let now = ProcessInfo.processInfo.systemUptime
+        guard elapsed - start < 0.8, start >= 15, now - lastCelebration >= 12 else { return }
+        lastCelebration = now
+        onHookStart?(scene.cue)
+    }
+
+    private func showBubble(_ cue: LyricCue, clock: PlaybackClock?, _ anchor: (rect: NSRect, screen: NSScreen)) {
         bubble.show(
             cue,
+            clock: clock,
+            style: BubbleStyle(
+                karaoke: isKaraokeEnabled,
+                reactions: isReactionEnabled,
+                beatPeriod: beatPeriod?()
+            ),
             feeling: isFeelingEnabled ? currentFeeling : .calm,
             feelingEnabled: isFeelingEnabled,
             anchor: anchor.rect,
@@ -330,6 +543,11 @@ final class LyricSinging: ObservableObject {
         guard bubbleShown != shown else { return }
         bubbleShown = shown
         onBubbleVisibility?(shown)
+    }
+
+    /// 폭죽을 터뜨릴 메뉴바 아이콘 자리.
+    func iconAnchor() -> (rect: NSRect, screen: NSScreen)? {
+        anchor()
     }
 
     private func anchor() -> (rect: NSRect, screen: NSScreen)? {

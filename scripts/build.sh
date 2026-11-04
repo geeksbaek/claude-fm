@@ -9,7 +9,8 @@ swift build -c release --product ClaudeFM
 BIN="$(swift build -c release --show-bin-path)/ClaudeFM"
 
 mkdir -p .build/tools
-swiftc -O scripts/render/main.swift Sources/ClaudeFM/ClawdSprite.swift -o .build/tools/render
+swiftc -O scripts/render/main.swift Sources/ClaudeFM/{ClawdSprite,ClawdPixels,DanceModel,PixelArt,LyricReaction}.swift \
+  -o .build/tools/render
 rm -rf .build/AppIcon.iconset
 .build/tools/render icon .build/AppIcon.iconset
 

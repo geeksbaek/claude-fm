@@ -13,9 +13,10 @@ struct NowTrack: Equatable {
         self.title = title
         self.artist = artist
         self.album = album
-        self.duration = duration
-        self.elapsed = elapsed
-        self.rate = rate
+        // 끝이 없는 라이브처럼 길이를 무한대로 알리는 앱도 있다. 그런 길이와 위치는 없는 것으로 본다.
+        self.duration = duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        self.elapsed = elapsed.isFinite ? elapsed : 0
+        self.rate = rate.isFinite ? rate : 0
     }
 }
 
@@ -84,9 +85,9 @@ extension NowTrack {
             (dict[key] as? NSNumber)?.doubleValue
         }
 
-        title = text("kMRMediaRemoteNowPlayingInfoTitle")
-        artist = text("kMRMediaRemoteNowPlayingInfoArtist")
-        album = text("kMRMediaRemoteNowPlayingInfoAlbum")
+        let title = text("kMRMediaRemoteNowPlayingInfoTitle")
+        let artist = text("kMRMediaRemoteNowPlayingInfoArtist")
+        let album = text("kMRMediaRemoteNowPlayingInfoAlbum")
         guard !title.isEmpty else { return nil }
 
         var duration = number("kMRMediaRemoteNowPlayingInfoDuration")
@@ -100,9 +101,7 @@ extension NowTrack {
                 elapsed += max(rate, 0) * max(delta, 0)
             }
         }
-        self.duration = duration
-        self.elapsed = max(0, elapsed)
-        self.rate = rate
+        self.init(title: title, artist: artist, album: album, duration: duration, elapsed: max(0, elapsed), rate: rate)
     }
 
     /// 재생 시각은 Date 이거나, 2001년 기준·1970년 기준 초 숫자로 온다.

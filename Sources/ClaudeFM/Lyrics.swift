@@ -4,6 +4,22 @@ import Foundation
 struct LyricLine: Equatable {
     var time: TimeInterval
     var text: String
+    /// 발음으로 바꾸기 전 원문. 무대에서 작게 같이 보여 준다.
+    var original = ""
+    /// 이 줄을 다 부르는 곡 시각(추정). 동기 가사에서만 있다.
+    var end: TimeInterval?
+    /// 낱말마다 시각이 적힌 가사(`<mm:ss.xx>`)에서 읽은 진행 표시.
+    var marks: [LyricMark] = []
+    var reaction: LyricReaction?
+    /// 곡에서 되풀이되는 후렴 줄.
+    var isHook = false
+    /// 후렴 덩어리의 첫 줄.
+    var hookStart = false
+
+    init(time: TimeInterval, text: String) {
+        self.time = time
+        self.text = text
+    }
 }
 
 /// 지금 부르는 가사와 다음에 올 가사 한 쌍.
@@ -14,6 +30,28 @@ struct LyricCue: Equatable {
     var next: String?
     var isInterlude = false
     var isHumming = false
+    /// 곡이 바뀌었을 때 잠깐 보여 주는 제목 카드. `current` 는 제목, `next` 는 가수.
+    var isTitle = false
+    /// 후주에 보여 주는 곡 기록.
+    var recap: LyricRecap?
+    /// 지금 줄을 부르기 시작하는 곡 시각. 동기 가사에서만 있다.
+    var start: TimeInterval?
+    /// 지금 줄을 다 부르는 곡 시각(추정).
+    var end: TimeInterval?
+    var marks: [LyricMark] = []
+    /// 다음 줄이 시작하는 곡 시각. 간주 끝 카운트다운에 쓴다.
+    var nextStart: TimeInterval?
+    var original = ""
+    var reaction: LyricReaction?
+    var isHook = false
+    var hookStart = false
+
+    init(current: String, next: String?, isInterlude: Bool = false, isHumming: Bool = false) {
+        self.current = current
+        self.next = next
+        self.isInterlude = isInterlude
+        self.isHumming = isHumming
+    }
 
     static func interlude(next: String? = nil) -> LyricCue {
         LyricCue(current: interludeToken, next: next, isInterlude: true)
@@ -22,11 +60,109 @@ struct LyricCue: Equatable {
     static func humming() -> LyricCue {
         LyricCue(current: hummingToken, next: nil, isHumming: true)
     }
+
+    static func title(_ title: String, artist: String) -> LyricCue {
+        var cue = LyricCue(current: title, next: artist.isEmpty ? nil : artist)
+        cue.isTitle = true
+        return cue
+    }
+
+    static func recap(_ recap: LyricRecap) -> LyricCue {
+        var cue = LyricCue(current: recap.headline, next: recap.caption)
+        cue.recap = recap
+        cue.reaction = recap.reaction
+        return cue
+    }
+
+    /// 글자는 같아도 다시 부르는 줄이면 다른 줄로 본다. 말풍선이 새 줄로 넘기는 기준이다.
+    func isSameLine(as other: LyricCue) -> Bool {
+        current == other.current && isInterlude == other.isInterlude && isHumming == other.isHumming
+            && isTitle == other.isTitle && (recap == nil) == (other.recap == nil) && start == other.start
+    }
+
+    /// 노래방처럼 지금 줄을 얼마나 불렀는지(0...1). 시각을 모르면 nil.
+    func progress(at elapsed: TimeInterval) -> Double? {
+        guard let start, let end, end > start, !isInterlude, !isHumming, !isTitle, recap == nil else { return nil }
+        if elapsed <= start { return 0 }
+        if elapsed >= end { return 1 }
+        var times = [start]
+        var fractions = [0.0]
+        for mark in marks where mark.time > times[times.count - 1] && mark.time < end {
+            times.append(mark.time)
+            fractions.append(max(fractions[fractions.count - 1], min(1, mark.fraction)))
+        }
+        times.append(end)
+        fractions.append(1)
+        for index in 1..<times.count where elapsed <= times[index] {
+            let span = times[index] - times[index - 1]
+            guard span > 0 else { return fractions[index] }
+            let t = (elapsed - times[index - 1]) / span
+            return fractions[index - 1] + (fractions[index] - fractions[index - 1]) * t
+        }
+        return 1
+    }
+
+    /// 간주 끝에 세는 박 수.
+    static let countdownDots = 4
+
+    /// 카운트다운 한 칸의 길이. 박을 잡았으면 한 박, 아니면 0.75초. 너무 길면 줄인다.
+    static func countdownBeat(_ period: Double?) -> Double {
+        var unit = 0.75
+        if let period, period >= 0.3, period <= 1.2 { unit = period }
+        return min(unit, 3.4 / Double(countdownDots))
+    }
+
+    /// 다음 줄(또는 아직 시작하지 않은 지금 줄)까지 남은 초. 간주 끝 카운트다운에 쓴다.
+    func countdown(at elapsed: TimeInterval) -> TimeInterval? {
+        if isInterlude, let nextStart, nextStart > elapsed { return nextStart - elapsed }
+        if !isInterlude, !isHumming, !isTitle, recap == nil, let start, start > elapsed { return start - elapsed }
+        return nil
+    }
+}
+
+/// 곡 시각을 시스템 시각에 잇는다. 그릴 때마다 지금 곡 시각을 다시 구해 노래방 채움이 매끄럽게 흐른다.
+struct PlaybackClock: Equatable {
+    /// `uptime` 에서의 곡 시각.
+    var elapsed: TimeInterval
+    var uptime: TimeInterval
+    var rate: Double
+
+    func elapsed(at now: TimeInterval) -> TimeInterval {
+        elapsed + rate * (now - uptime)
+    }
+}
+
+/// 지금 곡에서 보여 줄 한 장면. 말풍선과 무대가 같이 쓴다.
+struct LyricPerformance: Equatable {
+    var cue: LyricCue
+    /// 동기 가사일 때만 있다. 가사 싱크를 반영한 곡 시각.
+    var clock: PlaybackClock?
+    var title: String
+    var artist: String
+    /// 싱크를 반영하지 않은 실제 재생 위치. 진행 막대에 쓴다.
+    var position: PlaybackClock?
+    var duration: TimeInterval?
+
+    /// 곡에서 얼마나 왔는지(0...1). 길이를 모르면 nil.
+    func progress(at now: TimeInterval) -> Double? {
+        guard let position, let duration, duration.isFinite, duration > 1 else { return nil }
+        return min(1, max(0, position.elapsed(at: now) / duration))
+    }
 }
 
 struct LyricSong: Equatable {
     var instrumental: Bool
     var lines: [LyricLine]
+    /// 시각이 적힌 가사인지. 평문을 길이에 맞춰 펼친 가사는 노래방 채움을 하지 않는다.
+    var synced = false
+    var recap: LyricRecap?
+
+    init(instrumental: Bool, lines: [LyricLine], synced: Bool = false, recap: LyricRecap? = nil) {
+        self.instrumental = instrumental
+        self.lines = lines
+        self.synced = synced
+        self.recap = recap
+    }
 
     func text(at elapsed: TimeInterval) -> String? {
         guard let cue = cue(at: elapsed), !cue.isInterlude, !cue.isHumming else { return nil }
@@ -54,9 +190,9 @@ struct LyricSong: Equatable {
         // 첫 소절 시작 전 구간: 전주가 짧거나(3.8초 이하) 첫 소절이 곧 시작될 때(0.85초 이내)는 첫 소절을 바로 보여준다.
         if latestIndex == nil || latestIndex! < firstIndex {
             if firstLine.time <= 3.8 || firstLine.time - elapsed <= 0.85 {
-                return LyricCue(current: firstLine.text, next: secondLine?.text)
+                return sung(firstLine, next: secondLine)
             }
-            return .interlude(next: firstLine.text)
+            return interlude(before: firstLine)
         }
 
         let idx = latestIndex!
@@ -69,11 +205,11 @@ struct LyricSong: Equatable {
                     let totalGap = upcoming.time - prevLine.time
                     // 숨 고르기 수준의 짧은 빈 줄(3.5초 미만)에서는 직전 소절이 끊기지 않게 유지한다.
                     if emptyGap < 3.5 && totalGap < 6.0 {
-                        return LyricCue(current: prevLine.text, next: upcoming.text)
+                        return sung(prevLine, next: upcoming)
                     }
                 }
             }
-            return .interlude(next: upcoming?.text)
+            return interlude(before: upcoming)
         }
 
         let nextLine = lines[(idx + 1)...].first(where: { !$0.text.isEmpty })
@@ -82,19 +218,41 @@ struct LyricSong: Equatable {
             let gap = nextLine.time - activeLine.time
             if gap >= 10.0, sungElapsed >= 6.0 {
                 // 다음 가사까지 간격이 긴 간주 구간이면 다음 가사가 시작될 때까지 음표가 흐른다.
-                return .interlude(next: nextLine.text)
+                return interlude(before: nextLine)
             }
         } else if sungElapsed >= 7.0 {
-            // 마지막 가사가 끝난 뒤 후주 구간에서도 음표가 흐른다.
+            // 마지막 가사가 끝난 뒤 후주 구간에서는 곡에서 가장 많이 부른 말을 잠깐 보여 주고 음표가 흐른다.
+            if let recap, sungElapsed < 15.0 { return .recap(recap) }
             return .interlude()
         }
-        return LyricCue(current: activeLine.text, next: nextLine?.text)
+        return sung(activeLine, next: nextLine)
+    }
+
+    private func sung(_ line: LyricLine, next: LyricLine?) -> LyricCue {
+        var cue = LyricCue(current: line.text, next: next?.text)
+        cue.original = line.original
+        cue.reaction = line.reaction
+        cue.isHook = line.isHook
+        cue.hookStart = line.hookStart
+        if synced {
+            cue.start = line.time
+            cue.end = line.end
+            cue.marks = line.marks
+            cue.nextStart = next?.time
+        }
+        return cue
+    }
+
+    private func interlude(before line: LyricLine?) -> LyricCue {
+        var cue = LyricCue.interlude(next: line?.text)
+        if synced { cue.nextStart = line?.time }
+        return cue
     }
 
     /// 동기 가사가 있으면 그 시각을 쓰고, 없으면 길이에 맞춰 평문을 펼친다.
     static func make(synced: String?, plain: String?, duration: TimeInterval?, instrumental: Bool) -> LyricSong {
         if instrumental { return LyricSong(instrumental: true, lines: []) }
-        if let synced, let song = parseSynced(synced), song.lines.contains(where: { !$0.text.isEmpty }) {
+        if let synced, let song = parseSynced(synced, duration: duration), song.lines.contains(where: { !$0.text.isEmpty }) {
             return song
         }
         return parsePlain(plain ?? "", duration: duration)
@@ -102,15 +260,17 @@ struct LyricSong: Equatable {
 }
 
 extension LyricSong {
-    fileprivate static func parseSynced(_ raw: String) -> LyricSong? {
+    fileprivate static func parseSynced(_ raw: String, duration: TimeInterval?) -> LyricSong? {
         let source = raw.replacingOccurrences(of: "\r\n", with: "\n")
+        // LRC 의 [offset:] 은 양수면 가사를 그만큼 일찍 띄운다. 시각에 더할 값으로 바꿔 둔다.
         var offset = 0.0
         if let match = offsetPattern.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
            let range = Range(match.range(at: 1), in: source),
            let milliseconds = Double(source[range]) {
-            offset = milliseconds / 1000
+            offset = -milliseconds / 1000
         }
         var rows: [(time: TimeInterval, text: String)] = []
+        var marksByTime: [TimeInterval: [LyricMark]] = [:]
         for rawLine in source.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(rawLine)
             let ns = line as NSString
@@ -119,22 +279,36 @@ extension LyricSong {
             guard let last = matches.last else { continue }
             let start = last.range.location + last.range.length
             var text = start < ns.length ? ns.substring(from: start) : ""
-            text = wordTimePattern.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "")
+            let worded = LyricInsight.wordMarks(text, offset: offset)
+            text = wordTimePattern.stringByReplacingMatches(in: worded.text, range: NSRange(worded.text.startIndex..., in: worded.text), withTemplate: "")
             if isCreditOrSectionLine(text) { continue }
             text = sanitize(text)
             for match in matches {
                 guard let time = timestamp(ns, match) else { continue }
                 rows.append((time: time + offset, text: text))
+                // 낱말 시각은 첫 타임스탬프 줄에만 맞는다. 같은 줄을 여러 시각에 되풀이하면 쓰지 않는다.
+                if matches.count == 1, !worded.marks.isEmpty, !text.isEmpty, marksByTime[time + offset] == nil {
+                    marksByTime[time + offset] = worded.marks
+                }
             }
         }
         guard !rows.isEmpty else { return nil }
         rows.sort { $0.time < $1.time }
         let kanaSong = rows.reduce(0) { $0 + LyricScript.kanaCount($1.text) } >= 8
         let filtered = mergeSameTimeRows(LyricScript.keepingMainLanguage(rows))
-        let lines = filtered.map { row in
-            LyricLine(time: row.time, text: row.text.isEmpty ? "" : HangulReading.line(row.text, preferJapanese: kanaSong))
+        var lines = filtered.map { row -> LyricLine in
+            var line = LyricLine(time: row.time, text: row.text.isEmpty ? "" : HangulReading.line(row.text, preferJapanese: kanaSong))
+            if !line.text.isEmpty {
+                line.original = row.text
+                line.reaction = LyricReactionFinder.find(in: row.text)
+                line.marks = marksByTime[row.time] ?? []
+            }
+            return line
         }
-        return LyricSong(instrumental: false, lines: lines)
+        LyricInsight.estimateEnds(&lines, duration: duration)
+        LyricInsight.markHooks(&lines)
+        let recap = LyricInsight.recap(filtered.map(\.text))
+        return LyricSong(instrumental: false, lines: lines, synced: true, recap: recap)
     }
 
     fileprivate static func parsePlain(_ raw: String, duration: TimeInterval?) -> LyricSong {
@@ -151,10 +325,16 @@ extension LyricSong {
         }
         let kanaSong = rows.reduce(0) { $0 + LyricScript.kanaCount($1) } >= 8
         let texts = LyricScript.keepingMainLanguage(rows)
-        let lines = texts.enumerated().map { index, text in
-            LyricLine(time: Double(index) * step, text: text.isEmpty ? "" : HangulReading.line(text, preferJapanese: kanaSong))
+        var lines = texts.enumerated().map { index, text -> LyricLine in
+            var line = LyricLine(time: Double(index) * step, text: text.isEmpty ? "" : HangulReading.line(text, preferJapanese: kanaSong))
+            if !line.text.isEmpty {
+                line.original = text
+                line.reaction = LyricReactionFinder.find(in: text)
+            }
+            return line
         }
-        return LyricSong(instrumental: false, lines: lines)
+        LyricInsight.markHooks(&lines)
+        return LyricSong(instrumental: false, lines: lines, synced: false, recap: LyricInsight.recap(texts))
     }
 
     /// LRC 끝에 붙는 `^` 표기나 기호만 있는 줄, 또는 `(간주)`·`[Instrumental]` 같은 간주 표기 줄을 정리한다.
