@@ -928,7 +928,7 @@ final class BubbleView: NSView {
         let ripple = motion && feeling.sinceBeat < 1 ? 2.1 * energy : 0
         let tremble = motion && shout > 0.25 ? (shout - 0.25) * 1.6 : 0
         let breath = motion && whisper > 0.15 ? whisper * 1.5 : 0
-        let gold = (Self.hookGold.usingColorSpace(.sRGB) ?? Self.hookGold).withAlphaComponent(alpha)
+        let gold = (Self.shimmerGold.usingColorSpace(.sRGB) ?? Self.hookGold).withAlphaComponent(alpha)
         let unsung = (attributes[.foregroundColor] as? NSColor ?? NSColor.labelColor.withAlphaComponent(alpha))
         let unsungColor = unsung.usingColorSpace(.sRGB) ?? unsung
         let sungColor = (Self.sungColor.usingColorSpace(.sRGB) ?? Self.sungColor).withAlphaComponent(alpha)
@@ -980,8 +980,8 @@ final class BubbleView: NSView {
             if let shimmerX {
                 let glow = max(0, 1 - abs(slot.x + slot.width / 2 - shimmerX) / 16)
                 if glow > 0 {
-                    base = base.blended(withFraction: glow * 0.55, of: gold) ?? base
-                    lit = lit.blended(withFraction: glow * 0.6, of: gold) ?? lit
+                    base = base.blended(withFraction: glow * 0.7, of: gold) ?? base
+                    lit = lit.blended(withFraction: glow * 0.65, of: gold) ?? lit
                 }
             }
             let pivot = CGPoint(x: slot.x + slot.width / 2, y: slot.baseline - xHeight / 2)
@@ -1480,4 +1480,10 @@ final class BubbleView: NSView {
             : NSColor(srgbRed: 0.80, green: 0.36, blue: 0.22, alpha: 1)
     }
     private static let hookGold = NSColor(srgbRed: 1.0, green: 0.76, blue: 0.24, alpha: 1)
+    /// 후렴 글자를 훑는 반짝임. 밝은 화면에서는 탁해지지 않게 진한 호박색으로.
+    private static let shimmerGold = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 1.0, green: 0.80, blue: 0.30, alpha: 1)
+            : NSColor(srgbRed: 0.93, green: 0.58, blue: 0.02, alpha: 1)
+    }
 }
