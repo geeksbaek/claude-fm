@@ -185,6 +185,13 @@ if let cue = song.cue(at: 6) {
     check(early > 0.55, "줄 가운데쯤이면 절반 넘게 불렀다 \(early)")
 }
 
+// 채움 비율은 글자 수로 세고, 띄어쓰기 폭은 건너뛴다. 글자 하나 폭 2, 띄어쓰기 폭 1 로 잰다.
+let measure: (String) -> Double = { text in text.reduce(0) { $0 + ($1 == " " ? 1 : 2) } }
+check(near(KaraokeText.sungWidth("가나 다라", progress: 0.5, measure: measure), 5), "두 글자와 뒤 띄어쓰기까지 부른 폭 \(KaraokeText.sungWidth("가나 다라", progress: 0.5, measure: measure))")
+check(near(KaraokeText.sungWidth("가나 다라", progress: 0.625, measure: measure), 6), "셋째 글자 절반 \(KaraokeText.sungWidth("가나 다라", progress: 0.625, measure: measure))")
+check(near(KaraokeText.sungWidth("가나 다라", progress: 1, measure: measure), 9), "다 부르면 전체 폭")
+check(KaraokeText.sungWidth("!!", progress: 0.5, measure: measure) == 0, "글자 없는 줄은 0")
+
 // 거의 모든 줄이 되풀이되는 곡은 가장 많이 되풀이되는 줄만 후렴으로 본다.
 var loopLRC = ""
 let loopLines = ["춤을 춰 춤을 춰요", "밤새도록 춤을 춰", "춤을 춰 춤을 춰요", "밤새도록 춤을 춰",

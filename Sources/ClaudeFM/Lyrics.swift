@@ -22,6 +22,31 @@ struct LyricLine: Equatable {
     }
 }
 
+/// 노래방 채움 비율은 글자(문자·숫자) 수로 센다. 띄어쓰기와 문장부호는 세지 않는다.
+enum KaraokeText {
+    /// `progress` 만큼 부른 자리까지의 폭. `measure` 는 글 앞부분의 폭을 잰다.
+    static func sungWidth(_ text: String, progress: Double, measure: (String) -> Double) -> Double {
+        let letters = text.reduce(0) { $0 + ($1.isLetter || $1.isNumber ? 1 : 0) }
+        guard letters > 0 else { return 0 }
+        let target = min(1, max(0, progress)) * Double(letters)
+        guard target < Double(letters) else { return measure(text) }
+        var done = 0
+        var prefix = ""
+        for char in text {
+            if char.isLetter || char.isNumber {
+                if Double(done + 1) > target {
+                    let before = measure(prefix)
+                    let after = measure(prefix + String(char))
+                    return before + (after - before) * (target - Double(done))
+                }
+                done += 1
+            }
+            prefix.append(char)
+        }
+        return measure(text)
+    }
+}
+
 /// 지금 부르는 가사와 다음에 올 가사 한 쌍.
 struct LyricCue: Equatable {
     static let interludeToken = "♪ ♫ ♬"
