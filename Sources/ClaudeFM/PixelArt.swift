@@ -335,7 +335,7 @@ struct ConfettiBurst: Equatable {
             let spin = t * (7 + PixelNoise.unit(seed + i, 5) * 9) + PixelNoise.unit(seed + i, 6) * 6.28
             let fadeStart = Self.lifetime * 0.62
             let alpha = t < fadeStart ? 1 : max(0, 1 - (t - fadeStart) / (Self.lifetime - fadeStart))
-            let color = colors[(seed + i) % colors.count]
+            let color = colors[((seed + i) % colors.count + colors.count) % colors.count]
             let useGlyph = glyph != nil && i % 5 == 0
             out.append(Piece(
                 x: x,

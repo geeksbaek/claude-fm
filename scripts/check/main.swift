@@ -210,6 +210,10 @@ func runSurge(breakdown: Bool) -> Int {
 check(runSurge(breakdown: true) == 1, "드롭을 한 번 센다 \(runSurge(breakdown: true))")
 check(runSurge(breakdown: false) == 0, "고른 곡에서는 드롭이 없다 \(runSurge(breakdown: false))")
 
+// 제목 카드는 판본·영상 꼬리표를 뗀다.
+check(LyricMatch.baseTitle("Supernova (Official Video)") == "Supernova", "제목 꼬리표 \(LyricMatch.baseTitle("Supernova (Official Video)"))")
+check(LyricMatch.baseTitle("Love Wins All - Official Audio") == "Love Wins All", "제목 꼬리표 2")
+
 // MARK: - 오늘의 리듬
 
 var utc = Calendar(identifier: .gregorian)
@@ -248,6 +252,8 @@ check(fell >= 36, "폭죽은 아래로 떨어진다 \(fell)")
 check(later.contains { $0.glyph == .love }, "반응 그림도 섞어 뿌린다")
 check(burst.pieces(at: 0.5) == burst.pieces(at: 0.5), "같은 시각이면 같은 모양")
 check(burst.pieces(at: 2.3).allSatisfy { $0.alpha < 0.3 }, "끝날 즈음 흐려진다")
+let negativeSeed = ConfettiBurst(originX: 0, originY: 0, scale: 1, count: 12, seed: -5, colors: [.white, .coral], glyph: nil, upward: true)
+check(negativeSeed.pieces(at: 0.3).count == 12, "음수 씨앗도 괜찮다")
 
 var meter = SpectrumMeter()
 let loud: [Double] = [1e-3, 8e-4, 5e-4, 3e-4, 2e-4, 1e-4, 5e-5, 1e-6]

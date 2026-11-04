@@ -76,7 +76,7 @@ struct PopoverView: View {
             }
 
             if let today = rhythm.today.summary(on: Date()) {
-                Label(today, systemImage: "figure.socialdance")
+                Label(today, systemImage: "music.quarternote.3")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

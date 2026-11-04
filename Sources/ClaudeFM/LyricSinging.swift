@@ -366,9 +366,11 @@ final class LyricSinging: ObservableObject {
         guard let snapshot, abs(snapshot.rate) > 0.05 else { return nil }
         let clock = PlaybackClock(elapsed: snapshot.elapsed(at: now) - syncOffset, uptime: now, rate: snapshot.rate)
         let elapsed = clock.elapsed
+        // 판본 표시나 (Official Video) 같은 꼬리표는 떼고 보여 준다.
+        let shownTitle = LyricMatch.baseTitle(snapshot.title)
         let cue: LyricCue
         if now < titleCardUntil, showsTitleCard(at: elapsed) {
-            cue = .title(snapshot.title, artist: snapshot.artist)
+            cue = .title(shownTitle, artist: snapshot.artist)
         } else if let song {
             if song.instrumental {
                 cue = .interlude()
@@ -386,7 +388,7 @@ final class LyricSinging: ObservableObject {
         return LyricPerformance(
             cue: cue,
             clock: song?.synced == true ? clock : nil,
-            title: snapshot.title,
+            title: shownTitle,
             artist: snapshot.artist
         )
     }

@@ -590,13 +590,17 @@ enum StageScene {
                 let personal = 0.5 + PixelNoise.unit(seed, 72) * 0.8
                 // 환호할 때는 박과 상관없이 저마다의 박자로 펄쩍펄쩍 뛴다.
                 let leap = input.cheer * abs(sin(input.time * 9 + PixelNoise.unit(seed, 76) * 6.28)) * 4
-                let bob = -Int(max(hop * jump * personal, leap).rounded())
+                // 후렴에서는 관객석에 파도가 왼쪽에서 오른쪽으로 지나간다.
+                let wavePosition = Double(x) / Double(max(1, layout.width)) * 2 * .pi - input.time * 3.2
+                let crest = hook > 0.5 ? max(0, sin(wavePosition)) : 0
+                let surge = crest * crest * 4 * hook
+                let bob = -Int(max(hop * jump * personal, leap, surge).rounded())
                 let headY = baseY + bob + Int(PixelNoise.unit(seed, 73) * 2)
                 // 응원봉·휴대폰 불빛을 든 손
                 let holds = PixelNoise.unit(seed, 74) < (hook > 0.5 || input.cheer > 0.3 ? 0.92 : calm ? 0.5 : 0.42)
                 if input.live || input.cheer > 0.05, holds {
                     let hand = x + (PixelNoise.unit(seed, 75) > 0.5 ? headW + 1 : -2)
-                    let raise = hook > 0.5 ? 10 : 7
+                    let raise = (hook > 0.5 ? 10 : 7) + Int((crest * 3 * hook).rounded())
                     if calm {
                         let sway = Int((sin(input.time * 1.1 + Double(index) * 0.35) * 2).rounded())
                         let tipY = headY - raise + 2

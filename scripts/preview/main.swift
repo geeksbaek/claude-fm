@@ -344,6 +344,8 @@ MainActor.assumeIsolated {
         hud.idle = false
         hud.karaoke = true
         item.configure(&input, &hud)
+        // 무대 창처럼 제목·곡 기록이 뜨는 동안은 전광판을 어둡게 누른다.
+        if let cue = hud.cue, cue.isTitle || cue.recap != nil { input.splash = 1 }
         hud.palette = MoodPalette.of(input.pose.mood == .quiet ? .groove : input.pose.mood)
         hud.hop = input.pose.active ? input.pose.hop : 0
         write(renderStage(input, hud: hud), "stage-\(item.name).png")
@@ -445,11 +447,11 @@ func reactionStrip() -> NSBitmapImageRep {
     NSRect(origin: .zero, size: size).fill()
     for (index, reaction) in reactions.enumerated() {
         let pose = DancePose(active: true, hop: index % 2 == 0 ? 1 : 0.3, stepRight: index % 2 == 1, mood: .groove,
-                             style: index % 3 == 0 ? .handsUp : .bounce, danceTime: 1)
+                             style: .bounce, danceTime: 1)
         let origin = CGPoint(x: gap + CGFloat(index) * (cell.width + gap), y: gap)
         ClawdSprite.draw(frame: 2 + index, playing: false, dance: pose, scale: scale, origin: origin,
                          noteColor: NSColor(srgbRed: 0.16, green: 0.15, blue: 0.13, alpha: 1),
-                         accent: SpriteAccent(reaction: reaction, hook: false))
+                         accent: SpriteAccent(reaction: reaction, hook: false), decorations: false)
     }
     NSGraphicsContext.restoreGraphicsState()
     return rep
