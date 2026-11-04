@@ -549,6 +549,11 @@ let englishCases: [ReadingCase] = [
     ReadingCase("prism", "프리즘"),
     ReadingCase("enchanted", "인챈티드"),
     ReadingCase("lullaby", "럴러바이"),
+    ReadingCase("easier", "이지어"),
+    ReadingCase("happier", "해피어"),
+    ReadingCase("happiest", "해피스트"),
+    ReadingCase("craziest", "크레이지스트"),
+    ReadingCase("superhero", "슈퍼히어로"),
     // 기존 대표 예
     ReadingCase("Don't you know I want you", "돈츄 노 아이 원츄"),
     ReadingCase("I love you baby", "아이 러뷰 베이비"),

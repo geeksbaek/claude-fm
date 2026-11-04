@@ -461,6 +461,9 @@ extension HangulReading {
             let base = stem(suffix.count, plus: "y")
             if kind == "s", let movie = reading(stem(1)) { return appendPlural(movie, stem: stem(1)) }
             guard let spoken = reading(base) ?? ruleStem(base) else { continue }
+            // easy -> easier 이지어, happiest 해피스트: 끝 이 는 모음 그대로 둔다
+            if kind == "er" { return spoken + "어" }
+            if kind == "est" { return spoken + "스트" }
             return attachSuffix(spoken, kind: kind, stem: base)
         }
 
@@ -646,7 +649,7 @@ extension HangulReading {
         sun moon sky killer maker lover dancer singer player mate wise ward king queen hood rise set town city bell box
         name mind stone cream drop ring party music rock pop wave wind field gate door wall road street park stop lock
         shop case bag coat suit hat tale world show ride trip port board boat car plane flight tear tears one
-        floor step steps law away cover blood
+        floor step steps law away cover blood hero heroes
         """
         return Set(words.split(whereSeparator: { $0 == " " || $0 == "\n" }).map(String.init))
     }()

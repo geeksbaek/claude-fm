@@ -2048,6 +2048,16 @@ extension HangulReading {
     resume 레주메
     recipe 레시피
     karaoke 가라오케
+    bag 백
+    mask 마스크
+    emotional 이모셔널
+    everlasting 에버래스팅
+    exhaust 이그조스트
+    exhausted 이그조스티드
+    passionate 패셔닛
+    delicate 델리킷
+    unconditional 언컨디셔널
+    vibrant 바이브런트
     ginger 진저
     basically 베이시컬리
     y'know 야노
