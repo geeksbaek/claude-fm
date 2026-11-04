@@ -514,6 +514,7 @@ final class StageHUDView: NSView {
             title == other.title && subtitle == other.subtitle && live == other.live && bpm == other.bpm
                 && moodLabel == other.moodLabel && toast == other.toast && toastLevel == other.toastLevel
                 && needsPermission == other.needsPermission
+                && (cue?.isTitle == true) == (other.cue?.isTitle == true)
         }
     }
 
@@ -632,9 +633,11 @@ final class StageHUDView: NSView {
             drawCentered("♪ NOW PLAYING", y: centerY - 46 * unit + rise,
                          font: NSFont.systemFont(ofSize: 12 * unit, weight: .heavy),
                          color: state.palette.accent.nsColor(alpha: 0.9 * appear), kern: 3 * unit)
-            drawCentered(cue.current, y: centerY - 22 * unit + rise, font: titleFont, color: NSColor.white.withAlphaComponent(appear))
+            let maxWidth = bounds.width * 0.86
+            drawCentered(fit(cue.current, font: titleFont, width: maxWidth), y: centerY - 22 * unit + rise, font: titleFont,
+                         color: NSColor.white.withAlphaComponent(appear))
             if let artist = cue.next {
-                drawCentered(artist, y: centerY + 30 * unit + rise, font: artistFont,
+                drawCentered(fit(artist, font: artistFont, width: maxWidth), y: centerY + 30 * unit + rise, font: artistFont,
                              color: NSColor.white.withAlphaComponent(0.72 * appear))
             }
             return

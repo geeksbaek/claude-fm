@@ -22,8 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.delegate = self
         popover.contentViewController = NSHostingController(
             rootView: PopoverView(player: player, rhythm: rhythm, singing: singing) { [weak self] in
+                // 무대가 다른 창 뒤나 다른 데스크톱에 있어도 닫지 않고 앞으로 불러온다.
                 self?.popover.performClose(nil)
-                self?.stage.toggle()
+                self?.stage.show()
             }
         )
 

@@ -50,6 +50,21 @@ let reactionCases: [(String, LyricReaction?)] = [
     ("今天很开心", nil),
     ("小心一点", nil),
     ("我的心在跳", .love),
+    ("준비가 됐어", nil),
+    ("나비가 날아와", nil),
+    ("고개를 기울어", nil),
+    ("불길한 예감", nil),
+    ("너의 눈이 오늘따라", nil),
+    ("눈이 내 맘을 흔들어", nil),
+    ("하얀 눈이 내려", .snow),
+    ("눈이 오면 만나", .snow),
+    ("消えてゆきます", nil),
+    ("すき焼きを食べた", nil),
+    ("月曜日の朝", nil),
+    ("今月も", nil),
+    ("火曜日に会おう", nil),
+    ("月が綺麗ですね", .moon),
+    ("비가 내리는 밤", .tears),
 ]
 for (text, expected) in reactionCases {
     check(LyricReactionFinder.find(in: text) == expected, "반응 \(text) → \(String(describing: LyricReactionFinder.find(in: text))), 기대 \(String(describing: expected))")

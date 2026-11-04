@@ -80,6 +80,8 @@ final class LyricSinging: ObservableObject {
     private var spaceObserver: NSObjectProtocol?
     private var titleCardUntil = 0.0
     private var lastHookStart: TimeInterval?
+    /// 마지막으로 폭죽을 알린 시스템 시각. 후렴 덩어리가 잘게 쪼개져도 몇 초 사이에 두 번 터지지 않게 한다.
+    private var lastCelebration: TimeInterval = -1_000
     private let debug = ProcessInfo.processInfo.environment["CLAUDE_FM_DEBUG"] != nil
     /// 말풍선이 떠 있는 동안 상태 아이콘 툴팁이 가사를 가리지 않게 한다.
     private(set) var bubbleShown = false
@@ -443,7 +445,9 @@ final class LyricSinging: ObservableObject {
         let elapsed = clock.elapsed
         guard elapsed >= start - 0.03 else { return }
         lastHookStart = start
-        guard elapsed - start < 0.8, start >= 15 else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard elapsed - start < 0.8, start >= 15, now - lastCelebration >= 12 else { return }
+        lastCelebration = now
         onHookStart?(scene.cue)
     }
 
