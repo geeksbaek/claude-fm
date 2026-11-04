@@ -3,7 +3,8 @@ import Foundation
 import os
 
 /// 컴퓨터에서 재생 중인 소리를 사적인 프로세스 탭으로 받아 대역 에너지만 넘긴다.
-/// 탭은 음소거하지 않아서 들리던 소리는 그대로 들리고, 샘플은 저장하지 않는다.
+/// 평소에는 음소거하지 않아서 들리던 소리는 그대로 들리고, 샘플은 저장하지 않는다.
+/// 무대를 TV 로 보내는 동안에만 소리를 그대로 TV 로 넘기고(`setSink`), 이 Mac 에서는 끈다(`muted`).
 final class SystemAudioTap: @unchecked Sendable {
     struct Chunk {
         var low: Double
@@ -19,21 +20,40 @@ final class SystemAudioTap: @unchecked Sendable {
 
     private let bucket = OSAllocatedUnfairLock(initialState: Bucket())
     private let running = OSAllocatedUnfairLock(initialState: false)
+    /// TV 로 넘길 PCM 을 받을 곳. 탭 콜백에서 읽는다.
+    private let sink = OSAllocatedUnfairLock<StageAudioRing?>(initialState: nil)
+    private let rate = OSAllocatedUnfairLock<Double?>(initialState: nil)
     private var filters = BandSplit(sampleRate: 48_000)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var format = AudioStreamBasicDescription()
+    /// 탭이 받는 동안 이 Mac 의 소리를 끈다. 세션 큐에서만 바꾼다.
+    private var muted = false
     private let debug = ProcessInfo.processInfo.environment["CLAUDE_FM_DEBUG"] != nil
     /// 장치 시작은 메인 스레드를 붙잡는다. 권한 창이나 이전 탭 정리가 메인을 기다리면 메뉴바가 안 뜬다.
     private let session = DispatchQueue(label: "io.github.geeksbaek.claude-fm.rhythm")
 
     private static let aggregateUID = "io.github.geeksbaek.claude-fm.rhythm"
 
+    /// 탭을 (다시) 연다. `muted` 를 주면 그 방식으로 바꿔 연다. 주지 않으면 지난번 방식 그대로.
     @available(macOS 14.2, *)
-    func start() {
-        session.async { self.open() }
+    func start(muted: Bool? = nil) {
+        // 탭 콜백이 처음 시각을 바꿀 때 시계 눈금을 구하느라 멈추지 않게 미리 구해 둔다.
+        _ = HostClock.secondsPerTick
+        session.async {
+            if let muted { self.muted = muted }
+            self.open()
+        }
     }
+
+    /// TV 로 보낼 PCM 을 받을 곳을 단다. nil 이면 뗀다.
+    func setSink(_ ring: StageAudioRing?) {
+        sink.withLock { $0 = ring }
+    }
+
+    /// 지금 탭의 표본율. 탭이 열려 있지 않으면 nil.
+    var sampleRate: Double? { rate.withLock { $0 } }
 
     @available(macOS 14.2, *)
     func stop() {
@@ -46,7 +66,8 @@ final class SystemAudioTap: @unchecked Sendable {
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.name = "Claude FM Rhythm"
         description.isPrivate = true
-        description.muteBehavior = .unmuted
+        // TV 로 보내는 동안에는 탭이 받는 동안만 이 Mac 의 소리를 끈다. 탭이 멈추거나 앱이 끝나면 소리는 저절로 돌아온다.
+        description.muteBehavior = muted ? .mutedWhenTapped : .unmuted
 
         var newTap = AudioObjectID(kAudioObjectUnknown)
         let tapStatus = AudioHardwareCreateProcessTap(description, &newTap)
@@ -92,14 +113,16 @@ final class SystemAudioTap: @unchecked Sendable {
         }
         format = stream
         filters = BandSplit(sampleRate: stream.mSampleRate)
+        let sampleRate = stream.mSampleRate
+        rate.withLock { $0 = sampleRate }
         if debug {
             let interleaved = (stream.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
-            NSLog("[ClaudeFM] tap \(stream.mSampleRate) Hz \(stream.mChannelsPerFrame) ch \(interleaved ? "interleaved" : "planar")")
+            NSLog("[ClaudeFM] tap \(stream.mSampleRate) Hz \(stream.mChannelsPerFrame) ch \(interleaved ? "interleaved" : "planar")\(muted ? " muted" : "")")
         }
 
         var newProc: AudioDeviceIOProcID?
-        let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProc, newAggregate, nil) { [weak self] _, input, _, _, _ in
-            self?.consume(input)
+        let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProc, newAggregate, nil) { [weak self] _, input, inputTime, _, _ in
+            self?.consume(input, time: inputTime)
         }
         guard procStatus == noErr, let newProc else {
             NSLog("[ClaudeFM] IO proc failed: \(Self.statusText(procStatus))")
@@ -133,6 +156,7 @@ final class SystemAudioTap: @unchecked Sendable {
             AudioHardwareDestroyProcessTap(tapID)
             tapID = kAudioObjectUnknown
         }
+        rate.withLock { $0 = nil }
         bucket.withLock { $0 = Bucket() }
     }
 
@@ -153,8 +177,9 @@ final class SystemAudioTap: @unchecked Sendable {
         return running != 0
     }
 
-    private func consume(_ input: UnsafePointer<AudioBufferList>) {
+    private func consume(_ input: UnsafePointer<AudioBufferList>, time: UnsafePointer<AudioTimeStamp>) {
         guard running.withLock({ $0 }) else { return }
+        forward(input, time: time)
         let (low, high, full, bands, frames) = filters.energies(input, format: format)
         guard frames > 0 else { return }
         let dt = Double(frames) / format.mSampleRate
@@ -174,6 +199,30 @@ final class SystemAudioTap: @unchecked Sendable {
         }
         guard shouldFlush else { return }
         DispatchQueue.main.async { [weak self] in self?.flush() }
+    }
+
+    /// TV 로 보내는 동안 받은 소리를 그대로 넘긴다. 입력 시각(호스트 시각)을 같이 붙여 그림과 맞춘다.
+    /// 실시간 스레드라 미리 잡아 둔 칸에 복사만 한다.
+    private func forward(_ input: UnsafePointer<AudioBufferList>, time: UnsafePointer<AudioTimeStamp>) {
+        guard let ring = sink.withLock({ $0 }) else { return }
+        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
+        guard let first = buffers.first, let data = first.mData, first.mDataByteSize > 0, format.mSampleRate > 0 else { return }
+        let stamp = time.pointee
+        let host = stamp.mFlags.contains(.hostTimeValid) ? HostClock.seconds(stamp.mHostTime) : HostClock.now()
+        let left = UnsafePointer(data.assumingMemoryBound(to: Float.self))
+        if (format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0 {
+            let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size
+            var right = left
+            if buffers.count > 1, let second = buffers[1].mData, buffers[1].mDataByteSize >= first.mDataByteSize {
+                right = UnsafePointer(second.assumingMemoryBound(to: Float.self))
+            }
+            ring.write(left: left, right: right, stride: 1, frames: frames, host: host, rate: format.mSampleRate)
+        } else {
+            let stride = max(Int(first.mNumberChannels), 1)
+            let frames = Int(first.mDataByteSize) / (MemoryLayout<Float>.size * stride)
+            ring.write(left: left, right: stride > 1 ? left + 1 : left, stride: stride, frames: frames, host: host,
+                       rate: format.mSampleRate)
+        }
     }
 
     private func flush() {

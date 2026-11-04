@@ -8,7 +8,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let rhythm = RhythmDance()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private lazy var singing = LyricSinging { [weak self] in self?.statusItem.button }
-    private lazy var stage = StageWindowController { [weak self] in self?.stageSnapshot() ?? StageSnapshot() }
+    /// 무대 창과 TV 가 같이 보는 한 편의 무대.
+    private lazy var director = StageDirector { [weak self] in self?.stageSnapshot() ?? StageSnapshot() }
+    private lazy var stage = StageWindowController(director: director)
+    private lazy var caster = StageCaster(director: director)
     private let celebration = CelebrationOverlay()
     private let popover = NSPopover()
     private let menu = NSMenu()
@@ -23,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.animates = false
         popover.delegate = self
         popover.contentViewController = NSHostingController(
-            rootView: PopoverView(player: player, rhythm: rhythm, singing: singing) { [weak self] in
+            rootView: PopoverView(player: player, rhythm: rhythm, singing: singing, caster: caster) { [weak self] in
                 // 무대가 다른 창 뒤나 다른 데스크톱에 있어도 닫지 않고 앞으로 불러온다.
                 self?.popover.performClose(nil)
                 self?.stage.show()
@@ -82,16 +85,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self.rhythm.countFinishedSong()
             if self.singing.isReactionEnabled { self.applaud(banner: !nextStarted) }
         }
-        stage.onVisibilityChange = { [weak self] open in
-            self?.singing.setStageActive(open)
+        stage.onVisibilityChange = { [weak self] _ in
+            self?.syncStageActive()
             self?.syncAnimation()
         }
+        stage.onCastMenu = { [weak self] anchor in self?.caster.popUpMenu(below: anchor) }
+        caster.onChange = { [weak self] in
+            guard let self else { return }
+            self.stage.updateCast(self.caster.badge)
+            self.syncStageActive()
+        }
+        caster.onNotice = { [weak self] line, detail in self?.showCastNotice(line, detail: detail) }
+        caster.startSound = { [weak self] ring in self?.rhythm.sendSound(to: ring) ?? .unsupported }
+        caster.stopSound = { [weak self] in self?.rhythm.keepSoundHere() }
+        caster.sampleRate = { [weak self] in self?.rhythm.tapSampleRate }
         stage.onTogglePlayback = { [weak self] in self?.player.toggle() }
         stage.onNudgeSync = { [weak self] seconds in
             guard let self else { return }
             // 시각이 적힌 가사가 없으면 싱크를 옮겨도 보이지 않으니 저장된 값을 건드리지 않는다.
             guard self.singing.hasSyncedLyrics else {
-                self.stage.showToast("시각이 적힌 가사가 없어요")
+                self.stage.showToast("시각이 적힌 가사가 없어요", onTV: false)
                 return
             }
             self.singing.nudgeSync(by: seconds)
@@ -152,16 +165,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // TV 의 수신기 앱을 먼저 닫는다. 이 Mac 의 소리는 탭이 닫히며 돌아온다.
+        caster.shutdownForQuit()
         singing.stop()
         rhythm.stop()
     }
 
-    /// 후렴이 시작되면 폭죽을 터뜨린다. 무대가 보이면 무대에서, 아니면 메뉴바 아래에서.
-    private func celebrate(_ reaction: LyricReaction?, force: Bool = false) {
+    /// 무대 창이 열려 있거나 TV 로 보내는 동안에는 말풍선을 꺼 두었어도 가사를 찾는다.
+    private func syncStageActive() {
+        singing.setStageActive(stage.isOpen || caster.isActive)
+    }
+
+    /// TV 로 보내기 소식. 무대가 보이면 무대 창에만 띄우고(TV 에는 안 나간다), 아니면 메뉴바 말풍선으로.
+    private func showCastNotice(_ line: String, detail: String?) {
         if stage.isShowingOnActiveSpace {
-            stage.celebrate(reaction)
-            return
+            stage.showToast(detail.map { "\(line) · \($0)" } ?? line, onTV: false, seconds: 3.4)
+        } else {
+            singing.announce(line, next: detail, seconds: 6)
         }
+    }
+
+    /// 후렴이 시작되면 폭죽을 터뜨린다. 무대가 보이면 무대에서, 아니면 메뉴바 아래에서.
+    /// TV 로 보내는 중이면 무대 창이 닫혀 있어도 TV 무대에서 터진다.
+    private func celebrate(_ reaction: LyricReaction?, force: Bool = false) {
+        let onStage = stage.isShowingOnActiveSpace
+        if onStage || caster.isActive { director.burst(reaction: reaction) }
+        if onStage { return }
         guard force || !popover.isShown, let anchor = singing.iconAnchor() else { return }
         celebration.burst(at: anchor.rect, screen: anchor.screen, mood: rhythm.mood, reaction: reaction, force: force)
     }
@@ -184,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         applauseUntil = ProcessInfo.processInfo.systemUptime + 2.6
         syncAnimation()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) { [weak self] in self?.syncAnimation() }
-        if stage.isShowingOnActiveSpace { stage.encore(banner: banner) }
+        if stage.isShowingOnActiveSpace || caster.isActive { director.encore(banner: banner) }
     }
 
     private func stageSnapshot() -> StageSnapshot {
@@ -275,6 +304,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private let toggleItem = NSMenuItem(title: "", action: #selector(togglePlayback), keyEquivalent: "")
     private let stageItem = NSMenuItem(title: "무대 열기", action: #selector(toggleStage), keyEquivalent: "")
+    /// 같은 Wi-Fi 의 TV 목록이 열리는 하위 메뉴. 열 때 찾기 시작한다.
+    private let castItem = NSMenuItem(title: "무대를 TV 로 보내기", action: nil, keyEquivalent: "")
+    private let castMenu = NSMenu(title: "무대를 TV 로 보내기")
     private let bubbleItem = NSMenuItem(title: "가사 말풍선 표시", action: #selector(toggleBubble), keyEquivalent: "")
     private let feelingItem = NSMenuItem(title: "말풍선 파장 필링 효과", action: #selector(toggleFeeling), keyEquivalent: "")
     private let karaokeItem = NSMenuItem(title: "노래방 채움", action: #selector(toggleKaraoke), keyEquivalent: "")
@@ -286,6 +318,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         menu.addItem(toggleItem)
         menu.addItem(stageItem)
+        castMenu.delegate = caster
+        castItem.submenu = castMenu
+        castItem.image = NSImage(systemSymbolName: "tv", accessibilityDescription: nil)
+        menu.addItem(castItem)
         menu.addItem(.separator())
         menu.addItem(bubbleItem)
         menu.addItem(feelingItem)
@@ -304,6 +340,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func updateMenu() {
         toggleItem.title = player.isPlaying ? "일시정지" : "재생"
         stageItem.title = stage.isOpen ? "무대 닫기" : "무대 열기"
+        castItem.title = caster.menuTitle
+        // 찾기는 하위 메뉴를 열 때 시작한다. 그래야 로컬 네트워크 권한을 TV 를 찾을 때만 묻는다.
+        caster.populate(castMenu)
         bubbleItem.state = singing.isBubbleEnabled ? .on : .off
         feelingItem.state = singing.isFeelingEnabled ? .on : .off
         karaokeItem.state = singing.isKaraokeEnabled ? .on : .off

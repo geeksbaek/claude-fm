@@ -31,6 +31,8 @@ final class RhythmDance: ObservableObject {
     private var heardAudio = false
     private var silenceWhileRunning: TimeInterval = 0
     private var lastAccess: Int?
+    /// 무대를 TV 로 보내느라 탭을 음소거로 열어 둔 중.
+    private var sendingSound = false
     private let debug = ProcessInfo.processInfo.environment["CLAUDE_FM_DEBUG"] != nil
     private var lastDebugLog = 0.0
 
@@ -92,6 +94,30 @@ final class RhythmDance: ObservableObject {
     func refreshAccess() {
         pollAccess()
     }
+
+    /// 무대를 TV 로 보내는 동안 시스템 소리를 `ring` 으로 넘기고 이 Mac 에서는 끈다. 박 세기는 그대로 읽는다.
+    /// 권한이 없으면 탭이 0 만 주므로, 그때 끄면 TV 도 Mac 도 조용해진다. 그래서 권한을 확인한 뒤에만 끈다.
+    func sendSound(to ring: StageAudioRing) -> CastSound {
+        guard #available(macOS 14.2, *) else { return .unsupported }
+        let status = SystemAudioAccess.preflight()
+        guard status == 0 || (status == nil && heardAudio) else { return .needsPermission }
+        tap.setSink(ring)
+        sendingSound = true
+        tap.start(muted: true)
+        return .sending
+    }
+
+    /// TV 로 보내기를 마쳤다. 이 Mac 소리를 되돌린다.
+    func keepSoundHere() {
+        tap.setSink(nil)
+        guard sendingSound else { return }
+        sendingSound = false
+        guard #available(macOS 14.2, *) else { return }
+        tap.start(muted: false)
+    }
+
+    /// 지금 오디오 탭의 표본율.
+    var tapSampleRate: Double? { tap.sampleRate }
 
     static func openSettings() {
         let urls = [

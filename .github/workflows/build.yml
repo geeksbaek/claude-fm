@@ -48,6 +48,10 @@ jobs:
         shell: bash
         run: ./scripts/reading.sh
 
+      - name: Cast checks
+        shell: bash
+        run: ./scripts/cast-check.sh previews
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

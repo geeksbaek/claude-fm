@@ -29,6 +29,12 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>메뉴바의 Claude가 지금 나는 소리의 박자에 맞춰 춤추도록, 시스템 오디오의 세기만 확인합니다. 소리는 저장하지 않습니다.</string>
+    <string>메뉴바의 Claude가 지금 나는 소리의 박자에 맞춰 춤추도록 시스템 오디오의 세기를 확인하고, 무대를 TV 로 보낼 때는 소리도 함께 TV 로 보냅니다. 소리는 저장하지 않습니다.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>같은 Wi-Fi 의 크롬캐스트를 찾아 무대를 TV 로 보내요.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_googlecast._tcp</string>
+    </array>
 </dict>
 </plist>
