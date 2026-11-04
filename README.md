@@ -56,10 +56,11 @@ macOS 13 이상, Xcode 명령줄 도구가 필요하다. 로그인 시 자동 �
 
 ```sh
 ./scripts/check.sh            # 가사 분석·박 시계·폭죽·전광판 로직 검사
+./scripts/reading.sh          # 한국어 발음 읽기 예문 검사. 줄을 넘기면 읽은 결과만 본다
 ./scripts/preview.sh          # 말풍선·메뉴바 Clawd·무대를 상태별로 build/previews 에 그린다
 ```
 
-푸시할 때마다 GitHub Actions 가 macOS 에서 앱을 빌드하고, 로직을 검사하고, 미리보기 그림을 `previews` 아티팩트로 올린다.
+푸시할 때마다 GitHub Actions 가 macOS 에서 앱을 빌드하고, 로직과 발음 읽기를 검사하고, 미리보기 그림을 `previews` 아티팩트로 올린다.
 
 ## 구조
 
@@ -72,7 +73,10 @@ macOS 13 이상, Xcode 명령줄 도구가 필요하다. 로그인 시 자동 �
 - `Sources/ClaudeFM/SpectrumMeter.swift` — 옥타브 대역 세기를 전광판에 맞게 맞추기
 - `Sources/ClaudeFM/SystemAudioTap.swift` — 시스템 오디오를 사적인 프로세스 탭으로 받아 에너지만 넘긴다
 - `Sources/ClaudeFM/RhythmDance.swift` — 메뉴바와 팝오버, 무대가 같이 쓰는 춤 상태
-- `Sources/ClaudeFM/HangulReading.swift` — 한글이 아닌 가사를 한국어 발음으로 읽기
+- `Sources/ClaudeFM/HangulReading.swift` — 한글이 아닌 가사를 한국어 발음으로 읽기. 글자 갈래와 숫자
+- `Sources/ClaudeFM/HangulReading+English.swift`, `HangulReading+Lexicon.swift` — 영어 읽기 규칙과 낱말·구절 사전
+- `Sources/ClaudeFM/HangulReading+Japanese.swift`, `HangulReading+Chinese.swift` — 일본어 로마자와 중국어 병음을 한글로
+- `Sources/ClaudeFM/HangulReading+System.swift` — macOS 에 맡기는 일본어 낱말 나누기, 중국어 병음, 언어 알아보기
 - `Sources/ClaudeFM/Lyrics.swift` — 가사 시각과 LRCLIB 조회. 메모리에만 둔다
 - `Sources/ClaudeFM/LyricInsight.swift` — 노래방 채움 시각 어림, 후렴 찾기, 곡 기록
 - `Sources/ClaudeFM/LyricReaction.swift` — 원문에서 가사 반응 낱말 찾기
@@ -87,6 +91,7 @@ macOS 13 이상, Xcode 명령줄 도구가 필요하다. 로그인 시 자동 �
 - `Sources/ClaudeFM/AppDelegate.swift` — 메뉴바 아이템, 팝오버, 우클릭 메뉴
 - `scripts/render/` — 스프라이트로 앱 아이콘과 미리보기 시트를 그리는 도구
 - `scripts/check/` — 화면 없이 도는 로직 검사
+- `scripts/reading/` — 한국어 발음 읽기 예문 검사
 - `scripts/preview/` — 말풍선과 메뉴바 Clawd, 무대를 상태별로 그리는 도구
 
 ## 디버그
