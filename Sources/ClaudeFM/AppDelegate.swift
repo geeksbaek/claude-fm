@@ -96,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             self.stage.noteSync(self.singing.syncOffset)
         }
         singing.start()
+        introduceStageOnce()
 
         if ProcessInfo.processInfo.environment["CLAUDE_FM_DEBUG"] != nil {
             let center = DistributedNotificationCenter.default()
@@ -161,6 +162,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         guard force || !popover.isShown, let anchor = singing.iconAnchor() else { return }
         celebration.burst(at: anchor.rect, screen: anchor.screen, mood: rhythm.mood, reaction: reaction, force: force)
+    }
+
+    /// 새 무대를 처음 한 번만 말풍선으로 알린다.
+    private func introduceStageOnce() {
+        let key = "stageIntroShown"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            self?.singing.announce("Clawd 의 무대가 생겼어요 ♪", next: "아이콘을 누르고 무대 버튼을 눌러 보세요", seconds: 9)
+        }
     }
 
     /// 곡이 끝까지 흐르면 Clawd 가 두 팔을 들고 폴짝폴짝 박수를 친다. 무대에서는 관객이 환호하고,
@@ -238,7 +249,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             pose.hop = abs(sin(now * 9))
             accent.hook = true
         }
-        let key = IconKey(at: Date(), playing: player.isPlaying, title: player.title, pose: pose, accent: accent,
+        // 다른 앱에서 노래가 흐르면 툴팁에 그 곡을 적는다.
+        let tipTitle = singing.performance.map { "♪ \($0.title)" } ?? player.title
+        let key = IconKey(at: Date(), playing: player.isPlaying, title: tipTitle, pose: pose, accent: accent,
                           needsPermission: rhythm.needsPermission)
         guard key != lastIcon else { return }
         lastIcon = key

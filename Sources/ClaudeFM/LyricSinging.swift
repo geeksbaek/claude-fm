@@ -193,6 +193,13 @@ final class LyricSinging: ObservableObject {
         if clamped != syncOffset { syncOffset = clamped }
     }
 
+    /// 말풍선으로 잠깐 알린다. 지금 곡 가사보다 먼저 보인다.
+    func announce(_ line: String, next: String?, seconds: TimeInterval) {
+        preview = next.map { line + "|" + $0 } ?? line
+        previewUntil = ProcessInfo.processInfo.systemUptime + seconds
+        present()
+    }
+
     /// 디버그에서 말풍선 모양만 확인할 때. 비우면 영어·일본어·중국어 예시 발음을 보여 준다.
     func debugPreview(_ line: String?) {
         let sample = line?.trimmingCharacters(in: .whitespacesAndNewlines)
